@@ -1,0 +1,45 @@
+{
+  "name": "estudio-manager",
+  "version": "0.1.0",
+  "description": "Sistema de gestao para estudio de tatuagem, piercing e procedimentos esteticos",
+  "main": "./out/main/index.js",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
+    "preview": "electron-vite preview",
+    "api:dev": "tsx watch api/server.ts",
+    "api:start": "tsx api/server.ts",
+    "db:migrate": "tsx db/migrate.ts",
+    "db:seed": "tsx db/seed.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "mysql2": "^3.15.3",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^7.0.9",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.5",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.10.1",
+    "@types/nodemailer": "^7.0.4",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^39.2.1",
+    "electron-vite": "^4.0.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}
