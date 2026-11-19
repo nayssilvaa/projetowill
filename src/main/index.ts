@@ -14,7 +14,7 @@ function criarJanela(): void {
     show: false,
     autoHideMenuBar: true,
     title: 'Estudio Manager',
-    backgroundColor: '#13151c',
+    backgroundColor: '#0a080b',
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       // Isolamento obrigatorio: o renderer nunca recebe acesso direto a Node nem ao banco.

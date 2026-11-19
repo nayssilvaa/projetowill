@@ -26,6 +26,7 @@
     "src/shared/**/*.ts",
     "api/**/*.ts",
     "db/**/*.ts",
+    "testes/**/*.ts",
     "electron.vite.config.ts"
   ]
 }
