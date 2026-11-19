@@ -1,0 +1,265 @@
+# Estudio Manager
+
+Sistema de gestão para um estúdio de tatuagem, piercing e procedimentos estéticos.
+
+Projeto final da disciplina **DAD — Desenvolvimento de Aplicações Desktop**. O sistema foi
+levantado a partir da entrevista com o cliente fictício (transcrição em
+[`projetofinal.txt`](projetofinal.txt)) e atende aos requisitos de
+[`requisitos-projeto-final.pdf`](requisitos-projeto-final.pdf).
+
+---
+
+## O problema do cliente
+
+O dono do estúdio gerencia tudo no papel. Na entrevista ele apontou seis dores concretas:
+
+| O que ele disse | Como o sistema resolve |
+|---|---|
+| "quero cadastrar todos os meus clientes" | Cadastro de clientes com contato, endereço e dados de saúde |
+| "cadastrar os procedimentos que cada profissional faz" | Relação N:N entre profissional e procedimento — a agenda só deixa marcar com quem é habilitado |
+| "tem que ter uma agenda com todos os horários" | Agenda por dia e por profissional, com cálculo automático de horários livres |
+| "preciso guardar o histórico de cada cliente... o que fez, quando foi a última vez" | Ficha do cliente com linha do tempo e data de retorno sugerida por procedimento |
+| "controlar todos os materiais... muita coisa é importada, preciso saber quanto está o dólar" | Estoque com baixa automática e cotação USD-BRL congelada na compra |
+| "um dia antes eles têm que receber um e-mail avisando" | Agendador diário que envia o lembrete de 24h automaticamente |
+| "quero o mais automatizado possível" | CEP preenche o endereço, atendimento baixa o estoque, retorno é calculado sozinho |
+
+---
+
+## Requisitos técnicos obrigatórios
+
+| # | Requisito | Onde está |
+|---|---|---|
+| 1 | Banco relacional com no mínimo 6 tabelas relacionadas | **11 tabelas e 14 chaves estrangeiras** — [`db/migrations/001_schema_inicial.sql`](db/migrations/001_schema_inicial.sql) |
+| 2 | CRUD completo em todas as entidades | `src/core/repositories/` + telas em `src/renderer/src/paginas/` |
+| 3 | Consumo de API em 4 situações distintas | ViaCEP, cotação USD-BRL, SMTP e a API própria — detalhado abaixo |
+| 4 | Segurança justificada | Seção [Decisões de segurança](#decisões-de-segurança) |
+| 5 | Código modularizado em classes (POO) | 10 repositórios, 9 serviços e 3 integrações em `src/core/` |
+| 6 | Electron com TypeScript, sem `.js` de lógica | Todo o código-fonte é `.ts`/`.tsx` |
+
+---
+
+## As 4 situações de consumo de API
+
+Cada uma tem fonte e finalidade diferentes, e um propósito real no fluxo do sistema.
+
+**1. ViaCEP — autopreenchimento de endereço**
+`src/core/integrations/ViaCepClient.ts`
+Pedido explícito do cliente ("você digita o CEP e o endereço se preenche"). Usada no cadastro
+de cliente. Tem cache em memória, porque o mesmo CEP costuma ser digitado várias vezes.
+
+**2. AwesomeAPI — cotação do dólar**
+`src/core/integrations/CambioClient.ts`
+O estúdio compra material importado e o dono decide a compra pelo câmbio do dia. A cotação é
+gravada na tabela `cotacao_dolar` e **referenciada pela movimentação de estoque**, congelando o
+câmbio praticado naquela compra. Se a variação do dia passar do limite configurado, o sistema
+avisa antes de comprar.
+
+**3. SMTP (nodemailer) — lembrete por e-mail**
+`src/core/integrations/EmailClient.ts`
+Substitui o WhatsApp manual que o dono manda hoje. Sem SMTP configurado, o cliente entra em modo
+simulado e registra no console em vez de falhar — o app continua utilizável em desenvolvimento.
+
+**4. API própria em Express — agendador e relatórios**
+`api/ApiServer.ts`
+Esta precisa existir fora do Electron por um motivo real: **o lembrete de 24h tem que disparar
+mesmo com o aplicativo fechado**, e o processo do desktop só roda quando alguém o abre. O serviço
+fica de pé, executa o agendador diário (09:00) e expõe os relatórios consolidados. Reaproveita as
+mesmas classes de domínio do desktop, sem duplicar regra de negócio.
+
+---
+
+## Arquitetura
+
+```
+src/
+  main/        processo principal do Electron: janela, IPC, controle de acesso por canal
+  preload/     ponte segura (contextBridge) com allowlist de canais
+  renderer/    interface React + TypeScript
+  core/        REGRA DE NEGÓCIO — classes usadas pelo desktop E pela API
+    config/        leitura de variáveis de ambiente
+    database/      pool MySQL, transações
+    repositories/  acesso a dados (BaseRepository + 9 concretos)
+    services/      serviços de domínio
+    integrations/  clientes das APIs externas
+  shared/      tipos e schemas Zod compartilhados entre processos
+api/           API própria (Express + node-cron)
+db/            migrations SQL, runner e seed
+testes/        suíte de testes de fluxo
+```
+
+A regra de negócio mora em `src/core/` e não no processo do Electron porque **o app desktop e a
+API consomem as mesmas classes**. É isso que torna a modularização em classes uma necessidade da
+arquitetura, e não um enfeite para cumprir requisito.
+
+### Modelo de dados
+
+```
+usuario ──1:1── profissional ──N:N── procedimento ──N:N── material
+                     │                    │                  │
+                     └──────┐    ┌────────┘                  │
+                            ▼    ▼                           │
+cliente ──────────────▶ agendamento ──1:1── atendimento      │
+   │                                              │          │
+   └── endereco                                   ▼          ▼
+                                        movimentacao_estoque ─┘
+                                                   │
+                                                   └──▶ cotacao_dolar
+```
+
+| Tabela | Papel |
+|---|---|
+| `usuario` | Login, hash da senha e perfil de acesso |
+| `endereco` | Preenchido pela ViaCEP |
+| `cliente` | Contato, endereço e dados de saúde |
+| `profissional` | Vinculado a um usuário; comissão e registro |
+| `procedimento` | Catálogo: duração, preço e dias de retorno sugerido |
+| `profissional_procedimento` | **N:N** — quem está habilitado a executar o quê |
+| `agendamento` | Horário marcado, status e controle de lembrete enviado |
+| `atendimento` | O que foi realizado — o histórico do cliente |
+| `material` | Insumos, com marcação de importado e estoque mínimo |
+| `procedimento_material` | **N:N** — ficha técnica: o que cada procedimento consome |
+| `movimentacao_estoque` | Entradas, saídas, perdas e ajustes |
+| `cotacao_dolar` | Histórico de cotações consultadas |
+
+### Automações
+
+- CEP preenche logradouro, bairro, cidade e UF
+- Fechar um atendimento **baixa o estoque** pela ficha técnica, em transação única
+- Fechar um atendimento **calcula a data de retorno** do cliente
+- Material que atinge o mínimo gera alerta no painel
+- Compra de material importado **busca e congela a cotação** do dólar
+- Agendador envia o **lembrete de 24h** uma única vez por agendamento
+
+---
+
+## Decisões de segurança
+
+O requisito 4 pede que o grupo justifique as decisões tomadas para o **seu** sistema. O domínio
+aqui tem duas características que guiaram as escolhas: há **dados de saúde** (alergias, uso de
+anticoagulante, condições relevantes ao procedimento) e há **informação financeira** que só
+interessa ao dono.
+
+**Senhas.** Gravadas apenas como hash **bcrypt com custo 12**. A coluna `senha_hash` fica fora do
+`SELECT` padrão do repositório, então o hash não trafega por acidente até a interface. No login, a
+comparação bcrypt roda **mesmo quando o e-mail não existe**, contra um hash descartável, para que o
+tempo de resposta não revele quais e-mails estão cadastrados.
+
+**Sessão.** Token aleatório de 32 bytes assinado com **HMAC-SHA256** usando `APP_SECRET`, validade
+de 8 horas. A verificação da assinatura usa `timingSafeEqual`. Trocar a senha invalida todas as
+sessões abertas daquele usuário.
+
+**Controle de acesso por domínio.** Três perfis, desenhados a partir de como o estúdio funciona:
+
+| Perfil | Pode |
+|---|---|
+| `DONO` | Tudo: financeiro, estoque, cotação, usuários |
+| `RECEPCAO` | Agenda e cadastros — **sem** acesso a estoque, custos e faturamento |
+| `PROFISSIONAL` | **Apenas a própria agenda**; não enxerga a agenda dos colegas |
+
+A restrição do profissional não é só esconder botão: `AuthService.filtroProfissional()` força o
+filtro no servidor, então mesmo uma chamada IPC forjada não devolve a agenda de outro.
+
+**Validação de entrada.** Todo dado que entra passa por um schema **Zod** antes de chegar ao banco
+— inclusive validação real de CPF por dígito verificador, e não só por tamanho.
+
+**SQL.** Todas as queries usam placeholders `?`. Nenhum valor é concatenado em string SQL.
+
+**Isolamento do Electron.** `contextIsolation: true`, `nodeIntegration: false`. O preload **não
+expõe o `ipcRenderer`**: expõe só uma função `invocar()` restrita a uma allowlist fixa de canais.
+O renderer roda sob Content-Security-Policy restritiva e não tem acesso a Node nem ao banco.
+Links externos abrem no navegador do sistema, nunca dentro do app.
+
+**Erros.** Exceções nunca atravessam a ponte IPC: viram `{ ok: false, erro, codigo }`, sem stack
+trace e sem detalhe interno do banco.
+
+**Segredos.** Ficam no `.env`, que está fora do versionamento. O repositório traz apenas o
+`.env.example` com placeholders.
+
+**Exclusão.** Registros com histórico (cliente que já fez procedimento, profissional com agenda)
+são **desativados, não apagados** — apagar destruiria o histórico de saúde e o registro fiscal.
+
+---
+
+## Como rodar
+
+### Pré-requisitos
+
+- **Node.js** 20 ou superior
+- **MySQL Server** 8.0 ou superior
+- **Git**
+
+### Passo a passo
+
+```bash
+git clone <url-do-repositorio>
+cd ProjetoWill
+
+npm install
+
+# Windows:
+copy .env.example .env
+# Linux/Mac:
+cp .env.example .env
+```
+
+Abra o `.env` e preencha `DB_PASSWORD` com a senha do MySQL **da sua máquina**. Depois:
+
+```bash
+npm run db:migrate   # cria o banco e as 11 tabelas
+npm run db:seed      # popula com dados de exemplo
+npm run dev          # abre o aplicativo
+```
+
+Para o agendador de lembretes, em outro terminal:
+
+```bash
+npm run api:dev
+```
+
+### Usuários de demonstração
+
+Senha de todos: `Estudio@2026`
+
+| E-mail | Perfil |
+|---|---|
+| `dono@estudio.com` | DONO — acesso total |
+| `recepcao@estudio.com` | RECEPCAO — agenda e cadastros |
+| `marina@estudio.com` | PROFISSIONAL — só a própria agenda |
+
+### Scripts
+
+| Comando | O que faz |
+|---|---|
+| `npm run dev` | Aplicação desktop em modo desenvolvimento |
+| `npm run build` | Typecheck completo e build de produção |
+| `npm run typecheck` | Só a verificação de tipos |
+| `npm test` | Suíte de testes de fluxo (23 verificações) |
+| `npm run api:dev` | API própria com recarga automática |
+| `npm run db:migrate` | Aplica as migrations pendentes |
+| `npm run db:seed` | Repopula o banco com os dados de exemplo |
+
+### Observação para o grupo
+
+Cada integrante tem o **próprio MySQL local**, então o `.env` de cada um é diferente — por isso ele
+não vai para o Git. O `migrate` + `seed` são a receita que reproduz o banco idêntico em qualquer
+máquina. Quando alguém criar uma migration nova, os outros rodam `git pull` e `npm run db:migrate`
+(o runner só aplica o que ainda falta, é seguro rodar quantas vezes quiser).
+
+---
+
+## Testes
+
+```bash
+npm test
+```
+
+Exercita as regras que não dá para verificar só olhando a tela: controle de acesso por perfil,
+rejeição de CPF e senha inválidos, as duas APIs externas respondendo, bloqueio de horário
+sobreposto, bloqueio de profissional não habilitado, baixa de estoque ao fechar o atendimento e
+devolução correta no estorno.
+
+---
+
+## Stack
+
+Electron · TypeScript · React · Vite · MySQL · Express · Zod · bcrypt · nodemailer · node-cron
