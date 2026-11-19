@@ -56,15 +56,22 @@ export class NotificacaoService {
     return { texto, html }
   }
 
-  /** Agendamentos que acontecem daqui a 24h-48h e ainda nao foram lembrados. */
+  /**
+   * Agendamentos de amanha que ainda nao receberam lembrete.
+   *
+   * A janela e o dia seguinte inteiro, nao "daqui a 24h": o agendador roda uma
+   * vez de manha e precisa alcancar tambem quem tem horario cedo no outro dia,
+   * que uma janela deslizante de 24h deixaria de fora.
+   */
   async pendentes(): Promise<AgendamentoDetalhado[]> {
-    const agora = Date.now()
-    const paraMysql = (ms: number): string =>
-      new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
-    return this.agendamentos.pendentesDeLembrete(
-      paraMysql(agora + 24 * 3_600_000),
-      paraMysql(agora + 48 * 3_600_000)
-    )
+    const dia = (deslocamento: number): string => {
+      const data = new Date()
+      data.setDate(data.getDate() + deslocamento)
+      data.setHours(0, 0, 0, 0)
+      const pad = (n: number): string => String(n).padStart(2, '0')
+      return `${data.getFullYear()}-${pad(data.getMonth() + 1)}-${pad(data.getDate())} 00:00:00`
+    }
+    return this.agendamentos.pendentesDeLembrete(dia(1), dia(2))
   }
 
   async enviarLembretesPendentes(): Promise<ResultadoLembretes> {
