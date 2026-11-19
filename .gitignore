@@ -9,3 +9,4 @@ scripts/reset-mysql.log
 Thumbs.db
 .vite/
 *.tsbuildinfo
+commit-msg.tmp
