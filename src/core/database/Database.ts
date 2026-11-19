@@ -2,6 +2,9 @@ import mysql from 'mysql2/promise'
 import type { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise'
 import { env } from '../config/env.js'
 
+/** Valores aceitos como parametro de uma query parametrizada. */
+export type ValoresSql = Array<string | number | boolean | Date | null>
+
 /**
  * Ponto unico de acesso ao MySQL. Toda query do sistema passa por aqui,
  * sempre com placeholders `?` — nunca concatenando valores na string SQL.
@@ -41,7 +44,7 @@ export class Database {
   }
 
   async execute(sql: string, params: unknown[] = []): Promise<ResultSetHeader> {
-    const [result] = await this.pool.execute<ResultSetHeader>(sql, params)
+    const [result] = await this.pool.execute<ResultSetHeader>(sql, params as ValoresSql)
     return result
   }
 
