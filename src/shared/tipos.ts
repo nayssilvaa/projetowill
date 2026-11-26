@@ -77,6 +77,24 @@ export interface AgendamentoDetalhado extends Agendamento {
   procedimentoNome: string
 }
 
+export interface AvisoProfissional {
+  id: number
+  profissionalId: number
+  profissionalNome: string
+  remetenteNome: string | null
+  diaReferencia: string
+  totalAgendamentos: number
+  mensagem: string
+  criadoEm: string
+  lidoEm: string | null
+}
+
+export interface ResultadoAvisos {
+  diaReferencia: string
+  profissionaisAvisados: number
+  totalAgendamentos: number
+}
+
 export interface Atendimento {
   id: number
   agendamentoId: number
