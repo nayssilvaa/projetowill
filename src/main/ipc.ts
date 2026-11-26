@@ -254,6 +254,22 @@ export function registrarHandlers(): void {
     await garantirAcessoAoCliente(identidade, clienteId)
     return servicos.atendimentos.historicoDoCliente(clienteId)
   })
+  // Historico de procedimentos realizados. DONO: todos (com filtro opcional por
+  // profissional) e com valores. PROFISSIONAL: so os proprios, sem valores.
+  protegido(
+    'atendimentos:historicoRealizados',
+    async (identidade, inicio: string, fim: string, profissionalId?: number) => {
+      servicos.auth.exigirPerfil(identidade, 'DONO', 'PROFISSIONAL')
+      const ehDono = identidade.perfil === 'DONO'
+      return servicos.atendimentos.historicoRealizados(String(inicio), String(fim), {
+        profissionalId: ehDono
+          ? profissionalId || undefined
+          : servicos.auth.filtroProfissional(identidade),
+        incluirValores: ehDono
+      })
+    }
+  )
+
   protegido('atendimentos:retornosPendentes', async (identidade) => {
     servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
     return servicos.atendimentos.retornosPendentes()

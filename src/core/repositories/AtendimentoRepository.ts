@@ -1,6 +1,15 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise'
 import { BaseRepository } from './BaseRepository.js'
-import type { Atendimento, FormaPagamento } from '../../shared/tipos.js'
+import type { Atendimento, FormaPagamento, ProcedimentoRealizado } from '../../shared/tipos.js'
+
+function dataHoraLocal(valor: unknown): string {
+  if (!(valor instanceof Date)) return String(valor ?? '')
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return (
+    `${valor.getFullYear()}-${pad(valor.getMonth() + 1)}-${pad(valor.getDate())}` +
+    `T${pad(valor.getHours())}:${pad(valor.getMinutes())}`
+  )
+}
 
 function dataIso(valor: unknown): string | null {
   if (!valor) return null
@@ -86,6 +95,49 @@ export class AtendimentoRepository extends BaseRepository<Atendimento> {
   }
 
   /** Linha do tempo do cliente: o que fez, com quem, quando e se o retorno ja venceu. */
+  /**
+   * Procedimentos realizados no periodo: cliente, procedimento, profissional e quando.
+   * `profissionalId` restringe a um profissional (obrigatorio quando quem pede e ele mesmo).
+   */
+  async realizadosNoPeriodo(
+    inicio: string,
+    fimExclusivo: string,
+    profissionalId?: number
+  ): Promise<ProcedimentoRealizado[]> {
+    const filtro = profissionalId !== undefined ? ' AND a.profissional_id = ?' : ''
+    const parametros: unknown[] = [inicio, fimExclusivo]
+    if (profissionalId !== undefined) parametros.push(profissionalId)
+
+    const linhas = await this.db.query<RowDataPacket>(
+      `SELECT at.id, at.realizado_em, at.valor_cobrado,
+              c.id    AS cliente_id,
+              c.nome  AS cliente_nome,
+              pr.nome AS procedimento_nome,
+              p.id    AS profissional_id,
+              u.nome  AS profissional_nome
+       FROM atendimento at
+       JOIN agendamento a   ON a.id = at.agendamento_id
+       JOIN cliente c       ON c.id = a.cliente_id
+       JOIN procedimento pr ON pr.id = a.procedimento_id
+       JOIN profissional p  ON p.id = a.profissional_id
+       JOIN usuario u       ON u.id = p.usuario_id
+       WHERE at.realizado_em >= ? AND at.realizado_em < ?${filtro}
+       ORDER BY at.realizado_em DESC`,
+      parametros
+    )
+
+    return linhas.map((l) => ({
+      atendimentoId: l.id,
+      realizadoEm: dataHoraLocal(l.realizado_em),
+      clienteId: l.cliente_id,
+      clienteNome: l.cliente_nome,
+      procedimentoNome: l.procedimento_nome,
+      profissionalId: l.profissional_id,
+      profissionalNome: l.profissional_nome,
+      valorCobrado: Number(l.valor_cobrado)
+    }))
+  }
+
   async historicoDoCliente(clienteId: number): Promise<ItemHistoricoCliente[]> {
     const linhas = await this.db.query<RowDataPacket>(
       `SELECT at.id, at.agendamento_id, at.realizado_em, at.valor_cobrado,

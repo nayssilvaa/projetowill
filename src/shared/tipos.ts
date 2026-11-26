@@ -77,6 +77,19 @@ export interface AgendamentoDetalhado extends Agendamento {
   procedimentoNome: string
 }
 
+/** Linha do historico de procedimentos realizados (tela Historico). */
+export interface ProcedimentoRealizado {
+  atendimentoId: number
+  realizadoEm: string
+  clienteId: number
+  clienteNome: string
+  procedimentoNome: string
+  profissionalId: number
+  profissionalNome: string
+  /** So vem para o DONO; para o profissional e nulo. */
+  valorCobrado: number | null
+}
+
 export interface AvisoProfissional {
   id: number
   profissionalId: number

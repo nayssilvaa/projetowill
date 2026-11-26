@@ -9,18 +9,23 @@ import { Profissionais } from './paginas/Profissionais'
 import { Procedimentos } from './paginas/Procedimentos'
 import { Estoque } from './paginas/Estoque'
 import { Usuarios } from './paginas/Usuarios'
+import { Historico } from './paginas/Historico'
+import type { PerfilUsuario } from '@shared/tipos'
 
 interface ItemMenu {
   rota: string
   rotulo: string
   icone: string
   somenteDono?: boolean
+  /** Perfis que veem o item; sem a lista, todos veem. */
+  perfis?: PerfilUsuario[]
 }
 
 const MENU: ItemMenu[] = [
   { rota: '/', rotulo: 'Painel', icone: '◴' },
   { rota: '/agenda', rotulo: 'Agenda', icone: '🗓' },
   { rota: '/clientes', rotulo: 'Clientes', icone: '👤' },
+  { rota: '/historico', rotulo: 'Historico', icone: '📋', perfis: ['DONO', 'PROFISSIONAL'] },
   { rota: '/profissionais', rotulo: 'Profissionais', icone: '✂' },
   { rota: '/procedimentos', rotulo: 'Procedimentos', icone: '💉' },
   { rota: '/estoque', rotulo: 'Estoque e dolar', icone: '📦', somenteDono: true },
@@ -28,11 +33,15 @@ const MENU: ItemMenu[] = [
 ]
 
 export function App(): React.JSX.Element {
-  const { sessao, sair, ehDono } = useSessao()
+  const { sessao, sair, ehDono, perfil } = useSessao()
 
   if (!sessao) return <Login />
 
-  const itens = MENU.filter((item) => !item.somenteDono || ehDono)
+  const itens = MENU.filter(
+    (item) =>
+      (!item.somenteDono || ehDono) && (!item.perfis || (perfil && item.perfis.includes(perfil)))
+  )
+  const veHistorico = perfil === 'DONO' || perfil === 'PROFISSIONAL'
 
   return (
     <div className="app">
@@ -71,6 +80,7 @@ export function App(): React.JSX.Element {
           <Route path="/agenda" element={<Agenda />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/clientes/:id" element={<FichaCliente />} />
+          {veHistorico && <Route path="/historico" element={<Historico />} />}
           <Route path="/profissionais" element={<Profissionais />} />
           <Route path="/procedimentos" element={<Procedimentos />} />
           {ehDono && <Route path="/estoque" element={<Estoque />} />}

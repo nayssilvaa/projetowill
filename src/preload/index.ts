@@ -51,6 +51,7 @@ const CANAIS_PERMITIDOS = new Set([
   'atendimentos:obter',
   'atendimentos:historicoCliente',
   'atendimentos:retornosPendentes',
+  'atendimentos:historicoRealizados',
   'atendimentos:registrar',
   'atendimentos:atualizar',
   'atendimentos:estornar',

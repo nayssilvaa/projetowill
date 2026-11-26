@@ -5,8 +5,8 @@ import { ProcedimentoRepository } from '../repositories/ProcedimentoRepository.j
 import { MaterialRepository } from '../repositories/MaterialRepository.js'
 import { atendimentoSchema, atendimentoUpdateSchema } from '../../shared/validacao.js'
 import { validar } from '../validacaoUtil.js'
-import { ConflictError } from '../errors.js'
-import type { Atendimento, Material } from '../../shared/tipos.js'
+import { ConflictError, ValidationError } from '../errors.js'
+import type { Atendimento, Material, ProcedimentoRealizado } from '../../shared/tipos.js'
 
 export interface ResultadoAtendimento {
   atendimento: Atendimento
@@ -152,6 +152,32 @@ export class AtendimentoService {
         atendimento.agendamentoId
       ])
     })
+  }
+
+  /**
+   * Historico de procedimentos realizados entre `inicio` e `fim` (datas AAAA-MM-DD, inclusivas).
+   * Sem `incluirValores`, o valor cobrado e removido (o profissional nao ve o financeiro).
+   */
+  async historicoRealizados(
+    inicio: string,
+    fim: string,
+    opcoes: { profissionalId?: number; incluirValores: boolean }
+  ): Promise<ProcedimentoRealizado[]> {
+    const dataValida = /^\d{4}-\d{2}-\d{2}$/
+    if (!dataValida.test(inicio) || !dataValida.test(fim) || inicio > fim) {
+      throw new ValidationError('Periodo invalido.')
+    }
+    const diaSeguinte = new Date(`${fim}T00:00:00`)
+    diaSeguinte.setDate(diaSeguinte.getDate() + 1)
+    const pad = (n: number): string => String(n).padStart(2, '0')
+    const fimExclusivo = `${diaSeguinte.getFullYear()}-${pad(diaSeguinte.getMonth() + 1)}-${pad(diaSeguinte.getDate())} 00:00:00`
+
+    const lista = await this.atendimentos.realizadosNoPeriodo(
+      `${inicio} 00:00:00`,
+      fimExclusivo,
+      opcoes.profissionalId
+    )
+    return opcoes.incluirValores ? lista : lista.map((item) => ({ ...item, valorCobrado: null }))
   }
 
   async historicoDoCliente(clienteId: number) {

@@ -9,6 +9,7 @@ import type {
   Material,
   MovimentacaoEstoque,
   Procedimento,
+  ProcedimentoRealizado,
   Profissional,
   ResultadoAvisos,
   SessaoUsuario,
@@ -196,6 +197,13 @@ export const api = {
     historicoCliente: (clienteId: number) =>
       invocar<ItemHistorico[]>('atendimentos:historicoCliente', clienteId),
     retornosPendentes: () => invocar<RetornoPendente[]>('atendimentos:retornosPendentes'),
+    historicoRealizados: (inicio: string, fim: string, profissionalId?: number) =>
+      invocar<ProcedimentoRealizado[]>(
+        'atendimentos:historicoRealizados',
+        inicio,
+        fim,
+        profissionalId
+      ),
     estornar: (id: number) => invocar<boolean>('atendimentos:estornar', id)
   },
 
