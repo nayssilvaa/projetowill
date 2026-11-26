@@ -34,6 +34,14 @@ export class CotacaoRepository {
     return this.mapear(linha!)
   }
 
+  async buscarPorId(id: number): Promise<CotacaoDolar | null> {
+    const linha = await this.db.queryOne<RowDataPacket>(
+      'SELECT * FROM cotacao_dolar WHERE id = ?',
+      [id]
+    )
+    return linha ? this.mapear(linha) : null
+  }
+
   async maisRecente(): Promise<CotacaoDolar | null> {
     const linha = await this.db.queryOne<RowDataPacket>(
       'SELECT * FROM cotacao_dolar ORDER BY consultada_em DESC, id DESC LIMIT 1'

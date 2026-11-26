@@ -142,6 +142,8 @@ export const compraMaterialSchema = z.object({
   quantidade: z.number().positive('Quantidade deve ser maior que zero.'),
   precoUnitarioUsd: z.number().min(0).nullish(),
   custoUnitarioBrl: z.number().min(0).nullish(),
+  /** Cotacao mostrada na previa da compra: garante que o valor cobrado e o que o dono viu. */
+  cotacaoId: z.number().int().positive().nullish(),
   observacao: z.string().trim().max(255).nullish()
 })
 

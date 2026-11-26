@@ -98,9 +98,34 @@ export class EstoqueService {
     return this.cotacoes.historico(limite)
   }
 
+  /** Por quanto tempo a cotacao mostrada na previa continua valendo para fechar a compra. */
+  static readonly VALIDADE_COTACAO_MIN = 15
+
+  /**
+   * Cotacao usada na compra. Se veio a cotacao da previa, usa exatamente ela — assim o
+   * valor cobrado e o que o dono viu antes de confirmar. Ela precisa ser recente: uma
+   * previa esquecida aberta nao pode fechar a compra com um cambio velho.
+   */
+  private async cotacaoDaCompra(cotacaoId: number | null | undefined): Promise<CotacaoDolar> {
+    if (cotacaoId == null) {
+      return this.cotacoes.registrar(await this.cambio.cotacaoDolar())
+    }
+    const cotacao = await this.cotacoes.buscarPorId(cotacaoId)
+    if (!cotacao) throw new ValidationError('Cotacao da previa nao encontrada. Atualize a cotacao.')
+
+    const idadeMin = (Date.now() - new Date(cotacao.consultadaEm).getTime()) / 60_000
+    if (idadeMin > EstoqueService.VALIDADE_COTACAO_MIN) {
+      throw new ConflictError(
+        `A cotacao mostrada tem mais de ${EstoqueService.VALIDADE_COTACAO_MIN} minutos. Atualize a cotacao e confira o novo valor antes de confirmar.`
+      )
+    }
+    return cotacao
+  }
+
   /**
    * Entrada de material por compra. Se o material e importado e o preco veio em
-   * dolar, busca a cotacao do momento e congela o cambio usado naquela compra.
+   * dolar, converte pela cotacao da previa (ou busca uma nova) e congela o cambio
+   * usado naquela compra.
    */
   async registrarCompra(entrada: unknown, usuarioId: number): Promise<ResultadoCompra> {
     const dados = validar(compraMaterialSchema, entrada, 'Compra de material')
@@ -110,8 +135,7 @@ export class EstoqueService {
     let custoUnitarioBrl = dados.custoUnitarioBrl ?? null
 
     if (material.importado && dados.precoUnitarioUsd != null) {
-      const atual = await this.cambio.cotacaoDolar()
-      cotacao = await this.cotacoes.registrar(atual)
+      cotacao = await this.cotacaoDaCompra(dados.cotacaoId)
       custoUnitarioBrl = Number((dados.precoUnitarioUsd * cotacao.valorBrl).toFixed(2))
     }
 

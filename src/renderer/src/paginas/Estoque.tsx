@@ -335,15 +335,64 @@ function ModalCompra({
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
 
+  // Previa do valor em reais: a cotacao e consultada ao abrir e reaproveitada na compra.
+  const [previa, setPrevia] = useState<PainelCotacao | null>(null)
+  const [consultando, setConsultando] = useState(false)
+  const [agora, setAgora] = useState(Date.now())
+
+  const consultarPrevia = useCallback(async () => {
+    setConsultando(true)
+    setErro(null)
+    try {
+      setPrevia(await api.cotacao.consultar())
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Falha ao consultar a cotacao do dolar.')
+    } finally {
+      setConsultando(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (material.importado) void consultarPrevia()
+  }, [material.importado, consultarPrevia])
+
+  // Relogio para saber quando a cotacao da previa passou da validade.
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 15_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const qtd = Number(quantidade) || 0
+  const cotacaoPrevia = previa?.cotacao ?? null
+  const cotacaoVencida =
+    cotacaoPrevia !== null &&
+    agora - new Date(cotacaoPrevia.consultadaEm).getTime() > VALIDADE_COTACAO_MIN * 60_000
+
+  const usdUnit = Number(precoUsd) || 0
+  const brlUnit = material.importado
+    ? cotacaoPrevia
+      ? Number((usdUnit * cotacaoPrevia.valorBrl).toFixed(2))
+      : null
+    : Number(custoBrl) || 0
+  const totalBrl = brlUnit !== null ? Number((brlUnit * qtd).toFixed(2)) : null
+
+  const podeConfirmar =
+    !salvando &&
+    qtd > 0 &&
+    (material.importado
+      ? usdUnit > 0 && cotacaoPrevia !== null && !cotacaoVencida && !consultando
+      : Number(custoBrl) > 0)
+
   async function salvar(): Promise<void> {
     setSalvando(true)
     setErro(null)
     try {
       const r = await api.estoque.comprar({
         materialId: material.id,
-        quantidade: Number(quantidade),
-        precoUnitarioUsd: material.importado && precoUsd ? Number(precoUsd) : null,
-        custoUnitarioBrl: custoBrl ? Number(custoBrl) : null,
+        quantidade: qtd,
+        precoUnitarioUsd: material.importado && precoUsd ? usdUnit : null,
+        custoUnitarioBrl: !material.importado && custoBrl ? Number(custoBrl) : null,
+        cotacaoId: material.importado ? (cotacaoPrevia?.id ?? null) : null,
         observacao: observacao || null
       })
       const partes = [
@@ -365,12 +414,61 @@ function ModalCompra({
     <Modal titulo={`Comprar — ${material.nome}`} onFechar={onFechar}>
       {erro && <Aviso tipo="erro">{erro}</Aviso>}
 
-      {material.importado ? (
-        <Aviso tipo="atencao">
-          Material importado. Informando o preco em dolar, o sistema consulta a cotacao no momento da
-          compra e grava o cambio praticado junto da entrada.
-        </Aviso>
-      ) : null}
+      {material.importado && (
+        <div className="cartao" style={{ marginBottom: 12 }}>
+          {consultando && !cotacaoPrevia ? (
+            <span className="texto-suave">Consultando o dolar agora...</span>
+          ) : cotacaoPrevia ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span>
+                  Dolar agora: <strong>R$ {cotacaoPrevia.valorBrl.toFixed(4)}</strong>
+                  {cotacaoPrevia.variacaoPct !== null && (
+                    <span className={cotacaoPrevia.variacaoPct > 0 ? 'texto-alerta' : 'texto-sucesso'}>
+                      {' '}
+                      ({cotacaoPrevia.variacaoPct > 0 ? '+' : ''}
+                      {cotacaoPrevia.variacaoPct.toFixed(2)}% hoje)
+                    </span>
+                  )}
+                </span>
+                <button
+                  className="btn btn-pequeno"
+                  onClick={() => void consultarPrevia()}
+                  disabled={consultando}
+                >
+                  {consultando ? 'Consultando...' : 'Atualizar cotacao'}
+                </button>
+              </div>
+              <span className="texto-suave">
+                Consultado as{' '}
+                {new Date(cotacaoPrevia.consultadaEm).toLocaleTimeString('pt-BR', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+                . A compra usa exatamente este cambio.
+              </span>
+              {previa?.alerta && (
+                <p className="texto-alerta" style={{ margin: '6px 0 0' }}>
+                  {previa.mensagem}
+                </p>
+              )}
+              {cotacaoVencida && (
+                <p className="texto-alerta" style={{ margin: '6px 0 0' }}>
+                  Esta cotacao tem mais de {VALIDADE_COTACAO_MIN} minutos. Atualize antes de
+                  confirmar.
+                </p>
+              )}
+            </>
+          ) : (
+            <span className="texto-alerta">
+              Nao foi possivel consultar o dolar. Clique em atualizar para tentar de novo.{' '}
+              <button className="btn btn-pequeno" onClick={() => void consultarPrevia()}>
+                Atualizar cotacao
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="linha-campos">
         <Campo rotulo={`Quantidade (${material.unidade})`}>
@@ -409,17 +507,50 @@ function ModalCompra({
         <input value={observacao} onChange={(e) => setObservacao(e.target.value)} />
       </Campo>
 
+      <div className="cartao" style={{ marginTop: 4 }}>
+        <h2 style={{ marginBottom: 8 }}>Resumo da compra</h2>
+        <ul className="lista-simples">
+          {material.importado && (
+            <li>
+              <span>
+                {qtd} {material.unidade} x US$ {usdUnit.toFixed(2)}
+              </span>
+              <span>US$ {(usdUnit * qtd).toFixed(2)}</span>
+            </li>
+          )}
+          <li>
+            <span>Custo unitario em reais</span>
+            <span>{brlUnit !== null ? moeda(brlUnit) : '-'}</span>
+          </li>
+          <li>
+            <strong>Total em reais</strong>
+            <strong>{totalBrl !== null ? moeda(totalBrl) : '-'}</strong>
+          </li>
+        </ul>
+      </div>
+
       <div className="rodape-modal">
         <button className="btn" onClick={onFechar}>
           Cancelar
         </button>
-        <button className="btn btn-primario" onClick={() => void salvar()} disabled={salvando}>
-          {salvando ? 'Registrando...' : 'Registrar entrada'}
+        <button
+          className="btn btn-primario"
+          onClick={() => void salvar()}
+          disabled={!podeConfirmar}
+        >
+          {salvando
+            ? 'Registrando...'
+            : totalBrl
+              ? `Confirmar compra de ${moeda(totalBrl)}`
+              : 'Confirmar compra'}
         </button>
       </div>
     </Modal>
   )
 }
+
+/** Mesmo limite do EstoqueService: a previa vale por 15 minutos. */
+const VALIDADE_COTACAO_MIN = 15
 
 function ModalAjuste({
   material,
