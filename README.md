@@ -29,7 +29,7 @@ O dono do estúdio gerencia tudo no papel. Na entrevista ele apontou seis dores 
 
 | # | Requisito | Onde está |
 |---|---|---|
-| 1 | Banco relacional com no mínimo 6 tabelas relacionadas | **11 tabelas e 14 chaves estrangeiras** — [`db/migrations/001_schema_inicial.sql`](db/migrations/001_schema_inicial.sql) |
+| 1 | Banco relacional com no mínimo 6 tabelas relacionadas | **12 tabelas e 16 chaves estrangeiras** — [`db/migrations/`](db/migrations/) |
 | 2 | CRUD completo em todas as entidades | `src/core/repositories/` + telas em `src/renderer/src/paginas/` |
 | 3 | Consumo de API em 4 situações distintas | ViaCEP, cotação USD-BRL, SMTP e a API própria — detalhado abaixo |
 | 4 | Segurança justificada | Seção [Decisões de segurança](#decisões-de-segurança) |
@@ -58,13 +58,50 @@ avisa antes de comprar.
 `src/core/integrations/EmailClient.ts`
 Substitui o WhatsApp manual que o dono manda hoje. Sem SMTP configurado, o cliente entra em modo
 simulado e registra no console em vez de falhar — o app continua utilizável em desenvolvimento.
+Um envio simulado **não** marca o lembrete como enviado: ele continua pendente e sai de verdade
+assim que o SMTP for configurado. O Painel mostra se o e-mail está configurado, e erros comuns
+(login recusado, servidor inacessível) aparecem com uma explicação do que corrigir.
 
-**4. API própria em Express — agendador e relatórios**
+**Configurar o envio real (Gmail):** ative a verificação em duas etapas na conta remetente, gere
+uma senha de app em myaccount.google.com/apppasswords e preencha no `.env`:
+`SMTP_USER` (o e-mail), `SMTP_PASSWORD` (a senha de app de 16 letras) e `SMTP_FROM`. Depois
+reinicie a API (`npm run api:dev`).
+
+**4. API própria em Express — agendador e envios**
 `api/ApiServer.ts`
 Esta precisa existir fora do Electron por um motivo real: **o lembrete de 24h tem que disparar
 mesmo com o aplicativo fechado**, e o processo do desktop só roda quando alguém o abre. O serviço
-fica de pé, executa o agendador diário (09:00) e expõe os relatórios consolidados. Reaproveita as
-mesmas classes de domínio do desktop, sem duplicar regra de negócio.
+fica de pé, executa o agendador diário (09:00) e é o único responsável pelos envios. Reaproveita
+as mesmas classes de domínio do desktop, sem duplicar regra de negócio.
+
+| Rota | Proteção | Quem chama |
+|---|---|---|
+| `GET /saude` | pública | Painel (status do serviço) |
+| `GET /lembretes/pendentes` | chave | Painel (clientes de amanhã aguardando lembrete) |
+| `POST /lembretes/executar` | chave | Botão "Enviar lembretes de amanhã agora" |
+| `POST /avisos/executar` | chave | Botão "Avisar profissionais sobre amanhã" |
+
+A API só tem rotas que o desktop realmente usa. Relatórios e cotação o app lê direto pelas
+próprias classes de serviço, sem passar pela API, porque passar por ela não traria nenhum ganho.
+
+**Como o desktop consome a API** — `src/core/integrations/ApiPropriaClient.ts`
+O app não envia lembretes por conta própria: tudo passa pela API, que é a dona do envio. Assim o
+agendador e o botão manual nunca mandam o mesmo lembrete duas vezes. No fluxo do app:
+
+- o **Painel** consulta `GET /saude` e `GET /lembretes/pendentes` (a cada minuto) e mostra se o
+  serviço está no ar, se o envio das 09:00 está ativo e quantos clientes de amanhã aguardam aviso;
+  se a API cair, o painel alerta que os clientes **não estão recebendo** o lembrete;
+- o botão **"Enviar lembretes de amanhã agora"** chama `POST /lembretes/executar`;
+- o botão **"Avisar profissionais sobre amanhã"** chama `POST /avisos/executar`, informando quem
+  da recepção disparou (validado com zod na API).
+
+Às 09:00 o agendador da API faz as duas coisas sozinho: manda o lembrete aos **clientes** e gera,
+para cada **profissional**, o aviso com os atendimentos de amanhã, que aparece no painel dele
+(remetente "sistema"). A recepção só usa os botões se a agenda mudar depois disso. As duas tarefas
+rodam separadas: se o e-mail falhar, os profissionais continuam sendo avisados.
+
+As rotas são protegidas por chave (`x-api-key`, comparada em tempo constante) e a chamada sai do
+processo principal do Electron — a chave nunca chega ao renderer.
 
 ---
 
@@ -120,6 +157,7 @@ cliente ──────────────▶ agendamento ──1:1─�
 | `procedimento_material` | **N:N** — ficha técnica: o que cada procedimento consome |
 | `movimentacao_estoque` | Entradas, saídas, perdas e ajustes |
 | `cotacao_dolar` | Histórico de cotações consultadas |
+| `aviso_profissional` | Aviso da recepção a cada profissional sobre os atendimentos do dia seguinte, com controle de leitura |
 
 ### Automações
 
@@ -129,6 +167,7 @@ cliente ──────────────▶ agendamento ──1:1─�
 - Material que atinge o mínimo gera alerta no painel
 - Compra de material importado **busca e congela a cotação** do dólar
 - Agendador envia o **lembrete de 24h** uma única vez por agendamento
+- Recepção avisa cada profissional dos **atendimentos de amanhã**; o aviso aparece no painel dele e a recepção vê quem já leu
 
 ---
 
@@ -205,7 +244,7 @@ cp .env.example .env
 Abra o `.env` e preencha `DB_PASSWORD` com a senha do MySQL **da sua máquina**. Depois:
 
 ```bash
-npm run db:migrate   # cria o banco e as 11 tabelas
+npm run db:migrate   # cria o banco e as 12 tabelas
 npm run db:seed      # popula com dados de exemplo
 npm run dev          # abre o aplicativo
 ```
