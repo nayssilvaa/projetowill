@@ -1,11 +1,10 @@
 import { timingSafeEqual } from 'node:crypto'
 import express, { type Express, type NextFunction, type Request, type Response } from 'express'
-import cors from 'cors'
 import cron, { type ScheduledTask } from 'node-cron'
 import { NotificacaoService } from '../src/core/services/NotificacaoService.js'
-import { RelatorioService } from '../src/core/services/RelatorioService.js'
-import { AtendimentoService } from '../src/core/services/AtendimentoService.js'
-import { EstoqueService } from '../src/core/services/EstoqueService.js'
+import { AvisoService } from '../src/core/services/AvisoService.js'
+import { validar } from '../src/core/validacaoUtil.js'
+import { z } from 'zod'
 import { Database } from '../src/core/database/Database.js'
 import { AppError } from '../src/core/errors.js'
 import { env } from '../src/core/config/env.js'
@@ -16,8 +15,10 @@ import { env } from '../src/core/config/env.js'
  * Existe por um motivo real: o lembrete de 24h precisa disparar mesmo com o
  * aplicativo desktop fechado. O Electron nao serve para isso — ele so roda
  * quando alguem abre. Entao este servico fica de pe, executa o agendador
- * diario e expoe os relatorios consolidados que o desktop consome.
+ * diario e e o unico responsavel pelos envios (lembretes aos clientes e avisos
+ * aos profissionais), que o desktop consome pelo ApiPropriaClient.
  *
+ * So existem aqui rotas que o desktop realmente chama.
  * Reaproveita exatamente as mesmas classes de dominio do app, sem duplicar regra.
  */
 export class ApiServer {
@@ -26,9 +27,7 @@ export class ApiServer {
 
   constructor(
     private readonly notificacoes = new NotificacaoService(),
-    private readonly relatorios = new RelatorioService(),
-    private readonly atendimentos = new AtendimentoService(),
-    private readonly estoque = new EstoqueService()
+    private readonly avisos = new AvisoService()
   ) {
     this.app = express()
     this.configurar()
@@ -37,8 +36,8 @@ export class ApiServer {
   }
 
   private configurar(): void {
-    // So o proprio desktop (localhost) conversa com esta API.
-    this.app.use(cors({ origin: [/^http:\/\/localhost(:\d+)?$/, /^file:\/\//] }))
+    // Sem CORS de proposito: quem chama e o processo principal do Electron (Node),
+    // nao uma pagina web. Assim nenhum site aberto no navegador consegue ler as respostas.
     this.app.use(express.json({ limit: '100kb' }))
     this.app.disable('x-powered-by')
   }
@@ -73,6 +72,7 @@ export class ApiServer {
         status: 'ok',
         banco: await Database.getInstance().ping(),
         agendadorAtivo: this.tarefas.length > 0,
+        emailConfigurado: this.notificacoes.emailConfigurado,
         horario: new Date().toISOString()
       }))
     )
@@ -90,34 +90,15 @@ export class ApiServer {
       this.rota(() => this.notificacoes.enviarLembretesPendentes())
     )
 
-    protegidas.get(
-      '/relatorios/painel',
-      this.rota(() => this.relatorios.painelInicial())
-    )
-
-    protegidas.get(
-      '/relatorios/faturamento',
+    // Avisos internos aos profissionais sobre os atendimentos de amanha.
+    // O desktop informa quem disparou; sem remetente, o aviso sai como "sistema".
+    const corpoAvisos = z.object({ remetenteId: z.number().int().positive().nullish() })
+    protegidas.post(
+      '/avisos/executar',
       this.rota((req) => {
-        const hoje = new Date().toISOString().slice(0, 10)
-        const inicio = String(req.query.inicio ?? `${hoje.slice(0, 8)}01`)
-        const fim = String(req.query.fim ?? hoje)
-        return this.relatorios.faturamentoPorProfissional(inicio, fim)
+        const { remetenteId } = validar(corpoAvisos, req.body ?? {}, 'Avisos')
+        return this.avisos.avisarSobreAmanha(remetenteId ?? null)
       })
-    )
-
-    protegidas.get(
-      '/relatorios/retornos-pendentes',
-      this.rota(() => this.atendimentos.retornosPendentes())
-    )
-
-    protegidas.get(
-      '/relatorios/estoque-critico',
-      this.rota(() => this.estoque.abaixoDoMinimo())
-    )
-
-    protegidas.get(
-      '/cotacao',
-      this.rota(() => this.estoque.consultarCotacao())
     )
 
     this.app.use(protegidas)
@@ -138,7 +119,11 @@ export class ApiServer {
     })
   }
 
-  /** Agendador diario: as 9h varre a agenda e envia os lembretes de 24h. */
+  /**
+   * Agendador diario: as 9h varre a agenda de amanha, envia o lembrete de 24h aos
+   * clientes e avisa cada profissional dos proprios atendimentos. As duas tarefas
+   * sao independentes: a falha de uma (ex.: SMTP fora) nao impede a outra.
+   */
   private iniciarAgendador(): void {
     const diario = cron.schedule(
       '0 9 * * *',
@@ -152,6 +137,15 @@ export class ApiServer {
         } catch (erro) {
           console.error('[cron] falha ao enviar lembretes:', erro)
         }
+
+        try {
+          const avisos = await this.avisos.avisarSobreAmanha(null)
+          console.info(
+            `[cron] avisos: ${avisos.profissionaisAvisados} profissional(is) avisado(s) sobre ${avisos.totalAgendamentos} atendimento(s)`
+          )
+        } catch (erro) {
+          console.error('[cron] falha ao avisar profissionais:', erro)
+        }
       },
       { timezone: 'America/Sao_Paulo' }
     )
@@ -163,7 +157,9 @@ export class ApiServer {
     await new Promise<void>((resolve) => {
       this.app.listen(env.api.port, '127.0.0.1', () => {
         console.info(`[api] ouvindo em http://127.0.0.1:${env.api.port}`)
-        console.info('[api] agendador de lembretes ativo (diariamente as 09:00)')
+        console.info(
+          '[api] agendador ativo (diariamente as 09:00): lembretes aos clientes e avisos aos profissionais'
+        )
         resolve()
       })
     })
