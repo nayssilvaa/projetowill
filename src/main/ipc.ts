@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { servicos } from './container.js'
-import { AppError } from '../core/errors.js'
+import { AppError, ForbiddenError } from '../core/errors.js'
 import type { Identidade } from '../core/services/AuthService.js'
 import type { Resultado } from '../shared/tipos.js'
 
@@ -175,8 +175,10 @@ export function registrarHandlers(): void {
 
   protegido('agenda:obter', (_i, id: number) => servicos.agenda.obter(id))
 
-  protegido('agenda:horariosLivres', (_i, profissionalId: number, dia: string, procId: number) =>
-    servicos.agenda.horariosLivres(profissionalId, dia, procId)
+  protegido(
+    'agenda:horariosLivres',
+    (_i, profissionalId: number, dia: string, procId: number, ignorarId?: number) =>
+      servicos.agenda.horariosLivres(profissionalId, dia, procId, ignorarId)
   )
 
   protegido('agenda:agendar', async (identidade, dados: unknown) => {
@@ -184,9 +186,19 @@ export function registrarHandlers(): void {
     return servicos.agenda.agendar(dados)
   })
 
-  protegido('agenda:atualizar', (_i, id: number, dados: unknown) =>
-    servicos.agenda.atualizar(id, dados)
-  )
+  // DONO e RECEPCAO remarcam qualquer horario. O profissional so pode mudar o
+  // status (ex.: confirmar) dos proprios agendamentos — nunca remarcar.
+  protegido('agenda:atualizar', async (identidade, id: number, dados: unknown) => {
+    if (identidade.perfil === 'PROFISSIONAL') {
+      const atual = await servicos.agenda.obter(id)
+      servicos.auth.filtroProfissional(identidade, atual.profissionalId)
+      const campos = Object.keys((dados ?? {}) as Record<string, unknown>)
+      if (campos.some((c) => c !== 'status')) {
+        throw new ForbiddenError('Somente a recepcao pode remarcar horarios.')
+      }
+    }
+    return servicos.agenda.atualizar(id, dados)
+  })
 
   protegido('agenda:cancelar', async (identidade, id: number, motivo?: string) => {
     servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')

@@ -15,6 +15,7 @@ export function Agenda(): React.JSX.Element {
   const [erro, setErro] = useState<string | null>(null)
   const [mensagem, setMensagem] = useState<string | null>(null)
   const [abrindoNovo, setAbrindoNovo] = useState(false)
+  const [remarcando, setRemarcando] = useState<AgendamentoDetalhado | null>(null)
   const [fechando, setFechando] = useState<AgendamentoDetalhado | null>(null)
 
   const carregar = useCallback(async () => {
@@ -166,12 +167,17 @@ export function Agenda(): React.JSX.Element {
                           Registrar atendimento
                         </button>
                         {podeOperarCadastros && (
-                          <button
-                            className="btn btn-pequeno btn-perigo"
-                            onClick={() => void cancelar(a)}
-                          >
-                            Cancelar
-                          </button>
+                          <>
+                            <button className="btn btn-pequeno" onClick={() => setRemarcando(a)}>
+                              Remarcar
+                            </button>
+                            <button
+                              className="btn btn-pequeno btn-perigo"
+                              onClick={() => void cancelar(a)}
+                            >
+                              Cancelar
+                            </button>
+                          </>
                         )}
                       </>
                     )}
@@ -204,6 +210,22 @@ export function Agenda(): React.JSX.Element {
         />
       )}
 
+      {remarcando && (
+        <ModalAgendar
+          agendamento={remarcando}
+          diaInicial={remarcando.inicio.slice(0, 10)}
+          profissionais={profissionais}
+          onFechar={() => setRemarcando(null)}
+          onSalvo={async () => {
+            setRemarcando(null)
+            setMensagem(
+              'Agendamento remarcado. O cliente recebera um novo lembrete na vespera da nova data.'
+            )
+            await carregar()
+          }}
+        />
+      )}
+
       {fechando && (
         <ModalAtendimento
           agendamento={fechando}
@@ -219,26 +241,34 @@ export function Agenda(): React.JSX.Element {
   )
 }
 
+/** Cria um agendamento ou, recebendo `agendamento`, remarca um existente. */
 function ModalAgendar({
+  agendamento,
   diaInicial,
   profissionais,
   onFechar,
   onSalvo
 }: {
+  agendamento?: AgendamentoDetalhado
   diaInicial: string
   profissionais: Profissional[]
   onFechar: () => void
   onSalvo: () => Promise<void>
 }): React.JSX.Element {
+  const remarcando = agendamento !== undefined
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [procedimentos, setProcedimentos] = useState<ProcedimentoHabilitado[]>([])
-  const [clienteId, setClienteId] = useState('')
-  const [profissionalId, setProfissionalId] = useState('')
-  const [procedimentoId, setProcedimentoId] = useState('')
+  const [clienteId, setClienteId] = useState(agendamento ? String(agendamento.clienteId) : '')
+  const [profissionalId, setProfissionalId] = useState(
+    agendamento ? String(agendamento.profissionalId) : ''
+  )
+  const [procedimentoId, setProcedimentoId] = useState(
+    agendamento ? String(agendamento.procedimentoId) : ''
+  )
   const [dia, setDia] = useState(diaInicial)
   const [horarios, setHorarios] = useState<string[] | null>(null)
   const [inicio, setInicio] = useState('')
-  const [observacoes, setObservacoes] = useState('')
+  const [observacoes, setObservacoes] = useState(agendamento?.observacoes ?? '')
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
 
@@ -246,14 +276,21 @@ function ModalAgendar({
     api.clientes.listar().then(setClientes).catch(() => undefined)
   }, [])
 
-  // Os procedimentos oferecidos dependem de quem vai atender.
+  // Os procedimentos oferecidos dependem de quem vai atender. O procedimento escolhido
+  // so e mantido se o novo profissional tambem o faz (importante ao remarcar).
   useEffect(() => {
-    setProcedimentoId('')
     setProcedimentos([])
-    if (!profissionalId) return
+    if (!profissionalId) {
+      setProcedimentoId('')
+      return
+    }
     api.profissionais
       .procedimentos(Number(profissionalId))
-      .then((lista) => setProcedimentos(lista.filter((p) => p.ativo)))
+      .then((lista) => {
+        const ativos = lista.filter((p) => p.ativo)
+        setProcedimentos(ativos)
+        setProcedimentoId((atual) => (ativos.some((p) => String(p.id) === atual) ? atual : ''))
+      })
       .catch(() => undefined)
   }, [profissionalId])
 
@@ -263,22 +300,31 @@ function ModalAgendar({
     setHorarios(null)
     if (!profissionalId || !procedimentoId || !dia) return
     api.agenda
-      .horariosLivres(Number(profissionalId), dia, Number(procedimentoId))
+      .horariosLivres(Number(profissionalId), dia, Number(procedimentoId), agendamento?.id)
       .then(setHorarios)
       .catch((e: unknown) => setErro(e instanceof Error ? e.message : 'Falha ao buscar horarios.'))
-  }, [profissionalId, procedimentoId, dia])
+  }, [profissionalId, procedimentoId, dia, agendamento?.id])
 
   async function salvar(): Promise<void> {
     setSalvando(true)
     setErro(null)
     try {
-      await api.agenda.agendar({
-        clienteId: Number(clienteId),
-        profissionalId: Number(profissionalId),
-        procedimentoId: Number(procedimentoId),
-        inicio,
-        observacoes: observacoes || null
-      })
+      if (agendamento) {
+        await api.agenda.atualizar(agendamento.id, {
+          profissionalId: Number(profissionalId),
+          procedimentoId: Number(procedimentoId),
+          inicio,
+          observacoes: observacoes || null
+        })
+      } else {
+        await api.agenda.agendar({
+          clienteId: Number(clienteId),
+          profissionalId: Number(profissionalId),
+          procedimentoId: Number(procedimentoId),
+          inicio,
+          observacoes: observacoes || null
+        })
+      }
       await onSalvo()
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Falha ao agendar.')
@@ -290,11 +336,26 @@ function ModalAgendar({
   const procedimentoEscolhido = procedimentos.find((p) => p.id === Number(procedimentoId))
 
   return (
-    <Modal titulo="Novo agendamento" onFechar={onFechar}>
+    <Modal
+      titulo={agendamento ? `Remarcar — ${agendamento.clienteNome}` : 'Novo agendamento'}
+      onFechar={onFechar}
+    >
       {erro && <Aviso tipo="erro">{erro}</Aviso>}
 
+      {agendamento && (
+        <p className="texto-suave" style={{ marginTop: 0 }}>
+          Horario atual: {dataCurta(agendamento.inicio)} as {hora(agendamento.inicio)} com{' '}
+          {agendamento.profissionalNome} ({agendamento.procedimentoNome}). Escolha o novo dia e
+          horario.
+        </p>
+      )}
+
       <Campo rotulo="Cliente">
-        <select value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
+        <select
+          value={clienteId}
+          disabled={remarcando}
+          onChange={(e) => setClienteId(e.target.value)}
+        >
           <option value="">Selecione...</option>
           {clientes.map((c) => (
             <option key={c.id} value={c.id}>
@@ -355,6 +416,7 @@ function ModalAgendar({
                 onClick={() => setInicio(h)}
               >
                 {h.slice(11)}
+                {agendamento && h === agendamento.inicio && ' (atual)'}
               </button>
             ))}
           </div>
@@ -374,7 +436,13 @@ function ModalAgendar({
           onClick={() => void salvar()}
           disabled={salvando || !clienteId || !inicio}
         >
-          {salvando ? 'Agendando...' : 'Agendar'}
+          {salvando
+            ? remarcando
+              ? 'Remarcando...'
+              : 'Agendando...'
+            : remarcando
+              ? 'Confirmar remarcacao'
+              : 'Agendar'}
         </button>
       </div>
     </Modal>

@@ -170,8 +170,19 @@ export const api = {
   agenda: {
     listar: (inicio: string, fim: string, profissionalId?: number) =>
       invocar<AgendamentoDetalhado[]>('agenda:listar', inicio, fim, profissionalId),
-    horariosLivres: (profissionalId: number, dia: string, procedimentoId: number) =>
-      invocar<string[]>('agenda:horariosLivres', profissionalId, dia, procedimentoId),
+    horariosLivres: (
+      profissionalId: number,
+      dia: string,
+      procedimentoId: number,
+      ignorarAgendamentoId?: number
+    ) =>
+      invocar<string[]>(
+        'agenda:horariosLivres',
+        profissionalId,
+        dia,
+        procedimentoId,
+        ignorarAgendamentoId
+      ),
     agendar: (dados: unknown) => invocar<Agendamento>('agenda:agendar', dados),
     atualizar: (id: number, dados: unknown) => invocar<Agendamento>('agenda:atualizar', id, dados),
     cancelar: (id: number, motivo?: string) =>

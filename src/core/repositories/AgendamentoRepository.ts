@@ -97,6 +97,7 @@ export class AgendamentoRepository extends BaseRepository<Agendamento> {
       fim: string
       status: StatusAgendamento
       observacoes: string | null
+      lembrete_enviado_em: null
     }>
   ): Promise<Agendamento> {
     const { sql, valores } = this.montarUpdate(dados)

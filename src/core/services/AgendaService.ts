@@ -104,13 +104,18 @@ export class AgendaService {
       await this.garantirHorarioLivre(profissionalId, inicio, fim, id)
     }
 
+    // Remarcou: o cliente precisa de um lembrete novo (com a data nova) e de uma nova
+    // confirmacao, entao o lembrete volta a ficar pendente e o status volta a AGENDADO.
+    const remarcou = mudouHorario && (inicio !== atual.inicio || profissionalId !== atual.profissionalId)
+
     return this.agendamentos.atualizar(id, {
       profissional_id: dados.profissionalId,
       procedimento_id: dados.procedimentoId,
       inicio: mudouHorario ? paraMysql(inicio) : undefined,
       fim: mudouHorario ? paraMysql(fim) : undefined,
-      status: dados.status,
-      observacoes: dados.observacoes
+      status: dados.status ?? (remarcou && atual.status === 'CONFIRMADO' ? 'AGENDADO' : undefined),
+      observacoes: dados.observacoes,
+      lembrete_enviado_em: remarcou ? null : undefined
     })
   }
 
@@ -141,6 +146,7 @@ export class AgendaService {
     profissionalId: number,
     dia: string,
     procedimentoId: number,
+    ignorarAgendamentoId?: number,
     expediente = { inicio: 9, fim: 19 },
     passoMinutos = 30
   ): Promise<string[]> {
@@ -150,7 +156,10 @@ export class AgendaService {
       `${dia} 23:59:59`,
       profissionalId
     )
-    const ativos = ocupados.filter((a) => a.status !== 'CANCELADO' && a.status !== 'FALTOU')
+    // Ao remarcar, o horario atual do proprio agendamento nao conta como ocupado.
+    const ativos = ocupados.filter(
+      (a) => a.status !== 'CANCELADO' && a.status !== 'FALTOU' && a.id !== ignorarAgendamentoId
+    )
 
     const livres: string[] = []
     const agora = new Date()
