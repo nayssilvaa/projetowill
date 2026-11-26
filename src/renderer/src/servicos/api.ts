@@ -55,10 +55,11 @@ export interface RetornoPendente {
 
 export interface PainelInicial {
   agendamentosHoje: AgendamentoDetalhado[]
-  materiaisEmFalta: Material[]
   retornosPendentes: RetornoPendente[]
+  /** Dados de gestao: so chegam para o DONO; nos outros perfis vem nulo. */
+  materiaisEmFalta: Material[] | null
   ultimaCotacao: CotacaoDolar | null
-  faturamentoMes: number
+  faturamentoMes: number | null
 }
 
 export interface PainelCotacao {

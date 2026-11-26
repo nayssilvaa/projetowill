@@ -35,6 +35,17 @@ function protegido<A extends unknown[], T>(
   )
 }
 
+/** Id do profissional logado; falha se o usuario PROFISSIONAL nao tiver cadastro vinculado. */
+function meuProfissionalId(identidade: Identidade): number {
+  return servicos.auth.filtroProfissional(identidade) as number
+}
+
+/** DONO e RECEPCAO acessam qualquer cliente; o profissional, so os que atende. */
+async function garantirAcessoAoCliente(identidade: Identidade, clienteId: number): Promise<void> {
+  if (identidade.perfil !== 'PROFISSIONAL') return
+  await servicos.clientes.garantirAcessoDoProfissional(clienteId, meuProfissionalId(identidade))
+}
+
 export function registrarHandlers(): void {
   // ---- Autenticacao e usuarios -------------------------------------------
   publico('auth:login', (credenciais: unknown) => servicos.auth.login(credenciais))
@@ -73,12 +84,25 @@ export function registrarHandlers(): void {
   })
 
   // ---- Clientes ------------------------------------------------------------
-  protegido('clientes:listar', (_i, apenasAtivos: boolean) =>
-    servicos.clientes.listar(apenasAtivos)
+  // A ficha do cliente tem dados de saude. O profissional so acessa os clientes que atende.
+  protegido('clientes:listar', (identidade, apenasAtivos: boolean) =>
+    identidade.perfil === 'PROFISSIONAL'
+      ? servicos.clientes.listarDoProfissional(meuProfissionalId(identidade))
+      : servicos.clientes.listar(apenasAtivos)
   )
-  protegido('clientes:buscar', (_i, termo: string) => servicos.clientes.buscar(termo))
-  protegido('clientes:obter', (_i, id: number) => servicos.clientes.obter(id))
-  protegido('clientes:ficha', (_i, id: number) => servicos.clientes.ficha(id))
+  protegido('clientes:buscar', (identidade, termo: string) =>
+    identidade.perfil === 'PROFISSIONAL'
+      ? servicos.clientes.listarDoProfissional(meuProfissionalId(identidade), termo)
+      : servicos.clientes.buscar(termo)
+  )
+  protegido('clientes:obter', async (identidade, id: number) => {
+    await garantirAcessoAoCliente(identidade, id)
+    return servicos.clientes.obter(id)
+  })
+  protegido('clientes:ficha', async (identidade, id: number) => {
+    await garantirAcessoAoCliente(identidade, id)
+    return servicos.clientes.ficha(id)
+  })
   protegido('clientes:consultarCep', (_i, cep: string) => servicos.clientes.consultarCep(cep))
 
   protegido('clientes:criar', async (identidade, dados: unknown) => {
@@ -211,20 +235,62 @@ export function registrarHandlers(): void {
   })
 
   // ---- Atendimentos (historico) -------------------------------------------
-  protegido('atendimentos:listar', () => servicos.atendimentos.listar())
-  protegido('atendimentos:obter', (_i, id: number) => servicos.atendimentos.obter(id))
-  protegido('atendimentos:historicoCliente', (_i, clienteId: number) =>
-    servicos.atendimentos.historicoDoCliente(clienteId)
-  )
-  protegido('atendimentos:retornosPendentes', () => servicos.atendimentos.retornosPendentes())
+  // Historico = anotacoes tecnicas e valores. Lista geral so para DONO e RECEPCAO;
+  // o profissional ve o historico dos clientes que atende.
+  protegido('atendimentos:listar', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
+    return servicos.atendimentos.listar()
+  })
+  protegido('atendimentos:obter', async (identidade, id: number) => {
+    if (identidade.perfil === 'PROFISSIONAL') {
+      servicos.auth.filtroProfissional(
+        identidade,
+        await servicos.atendimentos.profissionalDoAtendimento(id)
+      )
+    }
+    return servicos.atendimentos.obter(id)
+  })
+  protegido('atendimentos:historicoCliente', async (identidade, clienteId: number) => {
+    await garantirAcessoAoCliente(identidade, clienteId)
+    return servicos.atendimentos.historicoDoCliente(clienteId)
+  })
+  protegido('atendimentos:retornosPendentes', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
+    return servicos.atendimentos.retornosPendentes()
+  })
 
-  protegido('atendimentos:registrar', (identidade, dados: unknown) =>
-    servicos.atendimentos.registrar(dados, identidade.usuarioId)
-  )
+  // O profissional so registra atendimento dos proprios agendamentos.
+  protegido('atendimentos:registrar', async (identidade, dados: unknown) => {
+    if (identidade.perfil === 'PROFISSIONAL') {
+      const agendamentoId = Number((dados as { agendamentoId?: unknown } | null)?.agendamentoId)
+      if (!Number.isInteger(agendamentoId) || agendamentoId <= 0) {
+        throw new ForbiddenError('Agendamento invalido.')
+      }
+      servicos.auth.filtroProfissional(
+        identidade,
+        await servicos.atendimentos.profissionalDoAgendamento(agendamentoId)
+      )
+    }
+    return servicos.atendimentos.registrar(dados, identidade.usuarioId)
+  })
 
-  protegido('atendimentos:atualizar', (_i, id: number, dados: never) =>
-    servicos.atendimentos.atualizar(id, dados)
-  )
+  // Editar valor e pagamento e financeiro: so o DONO. O profissional que atendeu pode
+  // corrigir as proprias anotacoes tecnicas e a data de retorno. A recepcao nao edita.
+  protegido('atendimentos:atualizar', async (identidade, id: number, dados: unknown) => {
+    if (identidade.perfil === 'RECEPCAO') throw new ForbiddenError()
+    if (identidade.perfil === 'PROFISSIONAL') {
+      servicos.auth.filtroProfissional(
+        identidade,
+        await servicos.atendimentos.profissionalDoAtendimento(id)
+      )
+      const permitidos = ['anotacoesTecnicas', 'dataRetornoSugerida']
+      const campos = Object.keys((dados ?? {}) as Record<string, unknown>)
+      if (campos.some((c) => !permitidos.includes(c))) {
+        throw new ForbiddenError('O profissional so pode editar anotacoes tecnicas e data de retorno.')
+      }
+    }
+    return servicos.atendimentos.atualizar(id, dados)
+  })
 
   protegido('atendimentos:estornar', async (identidade, id: number) => {
     servicos.auth.exigirPerfil(identidade, 'DONO')
@@ -233,14 +299,24 @@ export function registrarHandlers(): void {
   })
 
   // ---- Estoque e cotacao do dolar -----------------------------------------
+  // Custos, compras e cambio sao informacao do dono: todo o modulo e so do DONO.
   protegido('estoque:listar', async (identidade, apenasAtivos: boolean) => {
-    servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
+    servicos.auth.exigirPerfil(identidade, 'DONO')
     return servicos.estoque.listar(apenasAtivos)
   })
 
-  protegido('estoque:obter', (_i, id: number) => servicos.estoque.obter(id))
-  protegido('estoque:historico', (_i, id: number) => servicos.estoque.historico(id))
-  protegido('estoque:emFalta', () => servicos.estoque.abaixoDoMinimo())
+  protegido('estoque:obter', async (identidade, id: number) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO')
+    return servicos.estoque.obter(id)
+  })
+  protegido('estoque:historico', async (identidade, id: number) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO')
+    return servicos.estoque.historico(id)
+  })
+  protegido('estoque:emFalta', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO')
+    return servicos.estoque.abaixoDoMinimo()
+  })
 
   protegido('estoque:criar', async (identidade, dados: unknown) => {
     servicos.auth.exigirPerfil(identidade, 'DONO')
@@ -263,7 +339,7 @@ export function registrarHandlers(): void {
   })
 
   protegido('estoque:ajustar', async (identidade, dados: unknown) => {
-    servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
+    servicos.auth.exigirPerfil(identidade, 'DONO')
     return servicos.estoque.ajustar(dados, identidade.usuarioId)
   })
 
@@ -272,14 +348,24 @@ export function registrarHandlers(): void {
     return servicos.estoque.consultarCotacao()
   })
 
-  protegido('cotacao:ultima', () => servicos.estoque.ultimaCotacao())
-  protegido('cotacao:historico', (_i, limite: number) => servicos.estoque.historicoCotacoes(limite))
+  protegido('cotacao:ultima', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO')
+    return servicos.estoque.ultimaCotacao()
+  })
+  protegido('cotacao:historico', async (identidade, limite: number) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO')
+    return servicos.estoque.historicoCotacoes(Math.min(Math.max(1, Number(limite) || 15), 100))
+  })
 
   // ---- Lembretes e relatorios ---------------------------------------------
   // Lembretes passam pela API propria: ela e a dona do agendador e do envio.
   protegido('lembretes:status', () => servicos.apiPropria.status())
 
-  protegido('lembretes:pendentes', () => servicos.apiPropria.lembretesPendentes())
+  // Devolve nome e e-mail de clientes: so quem opera a agenda.
+  protegido('lembretes:pendentes', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
+    return servicos.apiPropria.lembretesPendentes()
+  })
 
   protegido('lembretes:enviar', async (identidade) => {
     servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
@@ -315,7 +401,10 @@ export function registrarHandlers(): void {
   })
 
   protegido('relatorios:painel', (identidade) =>
-    servicos.relatorios.painelInicial(servicos.auth.filtroProfissional(identidade))
+    servicos.relatorios.painelInicial(
+      servicos.auth.filtroProfissional(identidade),
+      identidade.perfil === 'DONO'
+    )
   )
 
   protegido('relatorios:faturamento', async (identidade, inicio: string, fim: string) => {

@@ -5,7 +5,7 @@ import { AgendamentoRepository } from '../repositories/AgendamentoRepository.js'
 import { ViaCepClient, type EnderecoViaCep } from '../integrations/ViaCepClient.js'
 import { clienteSchema, clienteUpdateSchema } from '../../shared/validacao.js'
 import { validar } from '../validacaoUtil.js'
-import { ConflictError } from '../errors.js'
+import { ConflictError, ForbiddenError } from '../errors.js'
 import type { AgendamentoDetalhado, Cliente, Endereco } from '../../shared/tipos.js'
 
 export interface ClienteComEndereco extends Cliente {
@@ -28,6 +28,24 @@ export class ClienteService {
     private readonly agendamentos = new AgendamentoRepository(),
     private readonly viaCep = new ViaCepClient()
   ) {}
+
+  /**
+   * A ficha tem dados de saude (alergias, condicoes). O profissional precisa deles
+   * antes do procedimento, mas so dos clientes que atende: quem nunca teve horario
+   * com ele fica fora do seu alcance.
+   */
+  async garantirAcessoDoProfissional(clienteId: number, profissionalId: number): Promise<void> {
+    if (!(await this.agendamentos.clienteTemVinculo(clienteId, profissionalId))) {
+      throw new ForbiddenError('Voce so pode ver a ficha dos clientes que atende.')
+    }
+  }
+
+  /** Lista restrita aos clientes do profissional; `termo` filtra como a busca normal. */
+  async listarDoProfissional(profissionalId: number, termo?: string): Promise<Cliente[]> {
+    const permitidos = new Set(await this.agendamentos.clientesDoProfissional(profissionalId))
+    const base = termo !== undefined ? await this.buscar(termo) : await this.listar(true)
+    return base.filter((c) => permitidos.has(c.id))
+  }
 
   /** Autopreenchimento pedido pelo cliente: digita o CEP, o resto vem da ViaCEP. */
   async consultarCep(cep: string): Promise<EnderecoViaCep> {

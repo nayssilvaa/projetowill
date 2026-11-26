@@ -16,11 +16,12 @@ function criarJanela(): void {
     title: 'Estudio Manager',
     backgroundColor: '#0a080b',
     webPreferences: {
-      preload: join(import.meta.dirname, '../preload/index.mjs'),
+      preload: join(import.meta.dirname, '../preload/index.cjs'),
       // Isolamento obrigatorio: o renderer nunca recebe acesso direto a Node nem ao banco.
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // Sandbox do Chromium: mesmo o preload roda sem acesso livre ao Node.
+      sandbox: true,
       webSecurity: true
     }
   })

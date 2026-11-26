@@ -302,31 +302,38 @@ export function Painel(): React.JSX.Element {
               </div>
             </div>
 
-            <div className="cartao indicador">
-              <div className="rotulo">Faturamento do mes</div>
-              <div className="valor">{moeda(dados.faturamentoMes)}</div>
-              <div className="nota">atendimentos fechados</div>
-            </div>
+            {/* Indicadores de gestao: o servidor so envia para o DONO. */}
+            {dados.faturamentoMes !== null && (
+              <div className="cartao indicador">
+                <div className="rotulo">Faturamento do mes</div>
+                <div className="valor">{moeda(dados.faturamentoMes)}</div>
+                <div className="nota">atendimentos fechados</div>
+              </div>
+            )}
 
-            <div className="cartao indicador">
-              <div className="rotulo">Materiais em falta</div>
-              <div className={`valor ${dados.materiaisEmFalta.length > 0 ? 'texto-alerta' : ''}`}>
-                {dados.materiaisEmFalta.length}
+            {dados.materiaisEmFalta !== null && (
+              <div className="cartao indicador">
+                <div className="rotulo">Materiais em falta</div>
+                <div className={`valor ${dados.materiaisEmFalta.length > 0 ? 'texto-alerta' : ''}`}>
+                  {dados.materiaisEmFalta.length}
+                </div>
+                <div className="nota">no ou abaixo do estoque minimo</div>
               </div>
-              <div className="nota">no ou abaixo do estoque minimo</div>
-            </div>
+            )}
 
-            <div className="cartao indicador">
-              <div className="rotulo">Dolar (ultima consulta)</div>
-              <div className="valor">
-                {dados.ultimaCotacao ? `R$ ${dados.ultimaCotacao.valorBrl.toFixed(4)}` : '-'}
+            {ehDono && (
+              <div className="cartao indicador">
+                <div className="rotulo">Dolar (ultima consulta)</div>
+                <div className="valor">
+                  {dados.ultimaCotacao ? `R$ ${dados.ultimaCotacao.valorBrl.toFixed(4)}` : '-'}
+                </div>
+                <div className="nota">
+                  {dados.ultimaCotacao
+                    ? `${dados.ultimaCotacao.variacaoPct?.toFixed(2) ?? '0.00'}% no dia`
+                    : 'nenhuma consulta registrada'}
+                </div>
               </div>
-              <div className="nota">
-                {dados.ultimaCotacao
-                  ? `${dados.ultimaCotacao.variacaoPct?.toFixed(2) ?? '0.00'}% no dia`
-                  : 'nenhuma consulta registrada'}
-              </div>
-            </div>
+            )}
           </div>
 
           <div className="grade grade-2">
@@ -364,26 +371,28 @@ export function Painel(): React.JSX.Element {
               )}
             </section>
 
-            <section className="cartao">
-              <h2>Materiais para repor</h2>
-              {dados.materiaisEmFalta.length === 0 ? (
-                <Vazio>Estoque saudavel.</Vazio>
-              ) : (
-                <ul className="lista-simples">
-                  {dados.materiaisEmFalta.map((m) => (
-                    <li key={m.id}>
-                      <span>
-                        {m.nome}
-                        {m.importado && <span className="texto-suave"> · importado</span>}
-                      </span>
-                      <span className="texto-alerta">
-                        {m.estoqueAtual} / min {m.estoqueMinimo} {m.unidade}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {dados.materiaisEmFalta !== null && (
+              <section className="cartao">
+                <h2>Materiais para repor</h2>
+                {dados.materiaisEmFalta.length === 0 ? (
+                  <Vazio>Estoque saudavel.</Vazio>
+                ) : (
+                  <ul className="lista-simples">
+                    {dados.materiaisEmFalta.map((m) => (
+                      <li key={m.id}>
+                        <span>
+                          {m.nome}
+                          {m.importado && <span className="texto-suave"> · importado</span>}
+                        </span>
+                        <span className="texto-alerta">
+                          {m.estoqueAtual} / min {m.estoqueMinimo} {m.unidade}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
 
             <section className="cartao">
               <h2>Clientes para chamar de volta</h2>

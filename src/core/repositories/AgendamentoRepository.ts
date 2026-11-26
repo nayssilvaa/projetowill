@@ -88,6 +88,23 @@ export class AgendamentoRepository extends BaseRepository<Agendamento> {
     return this.obrigatorio(resultado.insertId)
   }
 
+  /** Clientes que ja tiveram ou tem horario com o profissional (base do acesso a ficha). */
+  async clientesDoProfissional(profissionalId: number): Promise<number[]> {
+    const linhas = await this.db.query<RowDataPacket>(
+      'SELECT DISTINCT cliente_id FROM agendamento WHERE profissional_id = ?',
+      [profissionalId]
+    )
+    return linhas.map((l) => l.cliente_id as number)
+  }
+
+  async clienteTemVinculo(clienteId: number, profissionalId: number): Promise<boolean> {
+    const linha = await this.db.queryOne<RowDataPacket>(
+      'SELECT 1 AS existe FROM agendamento WHERE cliente_id = ? AND profissional_id = ? LIMIT 1',
+      [clienteId, profissionalId]
+    )
+    return linha !== null
+  }
+
   async atualizar(
     id: number,
     dados: Partial<{

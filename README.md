@@ -183,6 +183,10 @@ interessa ao dono.
 comparação bcrypt roda **mesmo quando o e-mail não existe**, contra um hash descartável, para que o
 tempo de resposta não revele quais e-mails estão cadastrados.
 
+**Força bruta.** Depois de **5 senhas erradas** para o mesmo e-mail, o login fica bloqueado por
+**5 minutos** — mesmo com a senha certa. O bloqueio vale também para e-mails que não existem, para
+não revelar quais estão cadastrados, e não afeta os outros usuários.
+
 **Sessão.** Token aleatório de 32 bytes assinado com **HMAC-SHA256** usando `APP_SECRET`, validade
 de 8 horas. A verificação da assinatura usa `timingSafeEqual`. Trocar a senha invalida todas as
 sessões abertas daquele usuário.
@@ -191,20 +195,30 @@ sessões abertas daquele usuário.
 
 | Perfil | Pode |
 |---|---|
-| `DONO` | Tudo: financeiro, estoque, cotação, usuários |
-| `RECEPCAO` | Agenda e cadastros — **sem** acesso a estoque, custos e faturamento |
-| `PROFISSIONAL` | **Apenas a própria agenda**; não enxerga a agenda dos colegas |
+| `DONO` | Tudo: faturamento, estoque, custos, cotação do dólar, usuários |
+| `RECEPCAO` | Agenda (criar, remarcar, cancelar), cadastros e lembretes — **sem** estoque, custos, cotação nem faturamento; não edita valores de atendimento |
+| `PROFISSIONAL` | **Apenas a própria agenda** e a ficha dos **clientes que atende**; confirma os próprios horários e corrige as próprias anotações técnicas |
 
-A restrição do profissional não é só esconder botão: `AuthService.filtroProfissional()` força o
-filtro no servidor, então mesmo uma chamada IPC forjada não devolve a agenda de outro.
+A restrição não é só esconder botão: cada canal do processo principal confere o perfil
+(`src/main/ipc.ts`), então mesmo uma chamada IPC forjada é recusada. O Painel recebe faturamento,
+estoque e cotação **só quando o perfil é DONO** — para os outros esses dados nem saem do servidor.
+
+**Dados de saúde.** A ficha do cliente tem alergias e condições de saúde. O profissional precisa
+delas antes do procedimento, mas **só dos clientes que já atendeu ou vai atender** (tem agendamento
+com ele). Tentar abrir a ficha ou o histórico de outro cliente é recusado
+(`ClienteService.garantirAcessoDoProfissional`). Nomes e e-mails da lista de lembretes também só
+chegam a quem opera a agenda.
 
 **Validação de entrada.** Todo dado que entra passa por um schema **Zod** antes de chegar ao banco
-— inclusive validação real de CPF por dígito verificador, e não só por tamanho.
+— inclusive validação real de CPF por dígito verificador, e não só por tamanho. A edição de
+atendimento usa schema `strict`: qualquer campo fora dos permitidos é recusado.
 
 **SQL.** Todas as queries usam placeholders `?`. Nenhum valor é concatenado em string SQL.
 
-**Isolamento do Electron.** `contextIsolation: true`, `nodeIntegration: false`. O preload **não
-expõe o `ipcRenderer`**: expõe só uma função `invocar()` restrita a uma allowlist fixa de canais.
+**Isolamento do Electron.** `contextIsolation: true`, `nodeIntegration: false` e **`sandbox: true`**
+(o preload é gerado em CommonJS justamente para poder rodar dentro do sandbox do Chromium). O
+preload **não expõe o `ipcRenderer`**: expõe só uma função `invocar()` restrita a uma allowlist fixa
+de canais.
 O renderer roda sob Content-Security-Policy restritiva e não tem acesso a Node nem ao banco.
 Links externos abrem no navegador do sistema, nunca dentro do app.
 

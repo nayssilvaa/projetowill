@@ -3,7 +3,7 @@ import { AtendimentoRepository } from '../repositories/AtendimentoRepository.js'
 import { AgendamentoRepository } from '../repositories/AgendamentoRepository.js'
 import { ProcedimentoRepository } from '../repositories/ProcedimentoRepository.js'
 import { MaterialRepository } from '../repositories/MaterialRepository.js'
-import { atendimentoSchema } from '../../shared/validacao.js'
+import { atendimentoSchema, atendimentoUpdateSchema } from '../../shared/validacao.js'
 import { validar } from '../validacaoUtil.js'
 import { ConflictError } from '../errors.js'
 import type { Atendimento, Material } from '../../shared/tipos.js'
@@ -105,15 +105,18 @@ export class AtendimentoService {
     return this.atendimentos.listar()
   }
 
-  async atualizar(
-    id: number,
-    dados: {
-      valorCobrado?: number
-      formaPagamento?: Atendimento['formaPagamento']
-      anotacoesTecnicas?: string | null
-      dataRetornoSugerida?: string | null
-    }
-  ): Promise<Atendimento> {
+  /** Profissional que realizou o atendimento (via agendamento), para o controle de acesso. */
+  async profissionalDoAtendimento(id: number): Promise<number> {
+    const atendimento = await this.atendimentos.obrigatorio(id)
+    return (await this.agendamentos.obrigatorio(atendimento.agendamentoId)).profissionalId
+  }
+
+  async profissionalDoAgendamento(agendamentoId: number): Promise<number> {
+    return (await this.agendamentos.obrigatorio(agendamentoId)).profissionalId
+  }
+
+  async atualizar(id: number, entrada: unknown): Promise<Atendimento> {
+    const dados = validar(atendimentoUpdateSchema, entrada, 'Atendimento')
     await this.atendimentos.obrigatorio(id)
     return this.atendimentos.atualizar(id, {
       valor_cobrado: dados.valorCobrado,

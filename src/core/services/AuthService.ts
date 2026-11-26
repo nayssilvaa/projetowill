@@ -10,6 +10,9 @@ import type { PerfilUsuario, SessaoUsuario, Usuario } from '../../shared/tipos.j
 
 const CUSTO_BCRYPT = 12
 const DURACAO_SESSAO_MS = 8 * 60 * 60 * 1000
+/** Protecao contra forca bruta: depois de N senhas erradas, o e-mail fica bloqueado. */
+const MAX_TENTATIVAS_LOGIN = 5
+const BLOQUEIO_LOGIN_MS = 5 * 60 * 1000
 
 export interface Identidade {
   usuarioId: number
@@ -29,6 +32,29 @@ export interface Identidade {
  */
 export class AuthService {
   private readonly sessoes = new Map<string, { identidade: Identidade; expiraEm: number }>()
+  /** Falhas de login por e-mail. Vale para e-mails existentes ou nao, para nao revelar quais existem. */
+  private readonly falhasLogin = new Map<string, { tentativas: number; bloqueadoAte: number }>()
+
+  private verificarBloqueio(email: string): void {
+    const registro = this.falhasLogin.get(email)
+    if (!registro || registro.bloqueadoAte <= Date.now()) return
+    const minutos = Math.ceil((registro.bloqueadoAte - Date.now()) / 60_000)
+    throw new UnauthorizedError(
+      `Muitas tentativas de login. Tente novamente em ${minutos} minuto(s).`
+    )
+  }
+
+  private registrarFalha(email: string): void {
+    const atual = this.falhasLogin.get(email)
+    // Bloqueio anterior ja venceu: recomeca a contagem.
+    const tentativas = atual && atual.bloqueadoAte <= Date.now() && atual.bloqueadoAte > 0
+      ? 1
+      : (atual?.tentativas ?? 0) + 1
+    this.falhasLogin.set(email, {
+      tentativas,
+      bloqueadoAte: tentativas >= MAX_TENTATIVAS_LOGIN ? Date.now() + BLOQUEIO_LOGIN_MS : 0
+    })
+  }
 
   constructor(
     private readonly usuarios = new UsuarioRepository(),
@@ -56,12 +82,19 @@ export class AuthService {
     const analise = loginSchema.safeParse(entrada)
     if (!analise.success) throw new UnauthorizedError()
 
+    const chave = analise.data.email.trim().toLowerCase()
+    this.verificarBloqueio(chave)
+
     const registro = await this.usuarios.buscarPorEmailComSenha(analise.data.email)
     // Hash descartavel: garante que o bcrypt rode mesmo sem usuario, igualando o tempo de resposta.
     const hashComparacao = registro?.senhaHash ?? '$2b$12$invalidoinvalidoinvalidoinvalidoinvalidoinvalidoinvalid'
     const senhaConfere = await bcrypt.compare(analise.data.senha, hashComparacao)
 
-    if (!registro || !senhaConfere || !registro.ativo) throw new UnauthorizedError()
+    if (!registro || !senhaConfere || !registro.ativo) {
+      this.registrarFalha(chave)
+      throw new UnauthorizedError()
+    }
+    this.falhasLogin.delete(chave)
 
     const profissional = await this.profissionais.buscarPorUsuarioId(registro.id)
     const token = this.gerarToken()

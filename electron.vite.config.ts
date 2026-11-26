@@ -18,7 +18,12 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: { input: { index: resolve('src/preload/index.ts') } }
+      rollupOptions: {
+        input: { index: resolve('src/preload/index.ts') },
+        // CommonJS de proposito: o Electron so roda preload com sandbox ligado se ele
+        // nao for modulo ES. Assim a janela pode usar `sandbox: true`.
+        output: { format: 'cjs', entryFileNames: '[name].cjs' }
+      }
     }
   },
   renderer: {

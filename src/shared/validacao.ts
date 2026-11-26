@@ -111,6 +111,16 @@ export const agendamentoUpdateSchema = z.object({
   observacoes: z.string().trim().max(2000).nullish()
 })
 
+/** Edicao de atendimento: so campos conhecidos (strict recusa qualquer campo extra). */
+export const atendimentoUpdateSchema = z
+  .object({
+    valorCobrado: z.number().min(0).optional(),
+    formaPagamento: z.enum(['DINHEIRO', 'PIX', 'DEBITO', 'CREDITO', 'OUTRO']).optional(),
+    anotacoesTecnicas: z.string().trim().max(4000).nullish(),
+    dataRetornoSugerida: z.iso.date().nullish()
+  })
+  .strict()
+
 export const atendimentoSchema = z.object({
   agendamentoId: z.number().int().positive(),
   valorCobrado: z.number().min(0),
