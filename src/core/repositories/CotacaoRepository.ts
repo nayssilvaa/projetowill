@@ -2,6 +2,20 @@ import type { RowDataPacket } from 'mysql2/promise'
 import { Database } from '../database/Database.js'
 import type { CotacaoDolar } from '../../shared/tipos.js'
 
+/**
+ * Data no horario local (AAAA-MM-DDTHH:MM:SS), como os demais repositorios.
+ * Antes usava toISOString(), que converte para UTC e fazia a tela mostrar o
+ * horario da consulta 3 horas adiantado.
+ */
+function dataHoraLocal(valor: unknown): string {
+  if (!(valor instanceof Date)) return String(valor ?? '')
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return (
+    `${valor.getFullYear()}-${pad(valor.getMonth() + 1)}-${pad(valor.getDate())}` +
+    `T${pad(valor.getHours())}:${pad(valor.getMinutes())}:${pad(valor.getSeconds())}`
+  )
+}
+
 export class CotacaoRepository {
   private readonly db = Database.getInstance()
 
@@ -11,10 +25,7 @@ export class CotacaoRepository {
       valorBrl: Number(linha.valor_brl),
       variacaoPct: linha.variacao_pct === null ? null : Number(linha.variacao_pct),
       fonte: linha.fonte,
-      consultadaEm:
-        linha.consultada_em instanceof Date
-          ? linha.consultada_em.toISOString()
-          : String(linha.consultada_em)
+      consultadaEm: dataHoraLocal(linha.consultada_em)
     }
   }
 
