@@ -20,9 +20,11 @@ export interface ItemHistoricoCliente {
   atendimentoId: number
   agendamentoId: number
   procedimentoNome: string
+  profissionalId: number
   profissionalNome: string
   realizadoEm: string
   valorCobrado: number
+  formaPagamento: FormaPagamento
   anotacoesTecnicas: string | null
   dataRetornoSugerida: string | null
   retornoVencido: boolean
@@ -141,8 +143,9 @@ export class AtendimentoRepository extends BaseRepository<Atendimento> {
   async historicoDoCliente(clienteId: number): Promise<ItemHistoricoCliente[]> {
     const linhas = await this.db.query<RowDataPacket>(
       `SELECT at.id, at.agendamento_id, at.realizado_em, at.valor_cobrado,
-              at.anotacoes_tecnicas, at.data_retorno_sugerida,
+              at.forma_pagamento, at.anotacoes_tecnicas, at.data_retorno_sugerida,
               pr.nome AS procedimento_nome,
+              p.id    AS profissional_id,
               u.nome  AS profissional_nome
        FROM atendimento at
        JOIN agendamento a   ON a.id = at.agendamento_id
@@ -154,17 +157,20 @@ export class AtendimentoRepository extends BaseRepository<Atendimento> {
       [clienteId]
     )
 
-    const hoje = new Date().toISOString().slice(0, 10)
+    // "Hoje" no horario local: toISOString() usaria UTC e viraria o dia as 21h.
+    const hoje = dataHoraLocal(new Date()).slice(0, 10)
     return linhas.map((l) => {
       const retorno = dataIso(l.data_retorno_sugerida)
       return {
         atendimentoId: l.id,
         agendamentoId: l.agendamento_id,
         procedimentoNome: l.procedimento_nome,
+        profissionalId: l.profissional_id,
         profissionalNome: l.profissional_nome,
-        realizadoEm:
-          l.realizado_em instanceof Date ? l.realizado_em.toISOString() : String(l.realizado_em),
+        // Horario local (antes usava toISOString e mostrava 3h adiantado).
+        realizadoEm: dataHoraLocal(l.realizado_em),
         valorCobrado: Number(l.valor_cobrado),
+        formaPagamento: l.forma_pagamento,
         anotacoesTecnicas: l.anotacoes_tecnicas,
         dataRetornoSugerida: retorno,
         retornoVencido: retorno !== null && retorno <= hoje

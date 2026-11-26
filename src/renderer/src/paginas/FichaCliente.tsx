@@ -1,25 +1,55 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, type FichaCliente as Ficha } from '../servicos/api'
-import { Aviso, Carregando, Etiqueta, Vazio } from '../componentes/Comuns'
+import { api, type FichaCliente as Ficha, type ItemHistorico } from '../servicos/api'
+import { useSessao } from '../contexto/SessaoContexto'
+import { Aviso, Campo, Carregando, Etiqueta, Modal, Vazio } from '../componentes/Comuns'
 import { cep, cpf, dataCurta, dataHora, moeda, telefone } from '../util/formato'
+import type { FormaPagamento } from '@shared/tipos'
 
 export function FichaCliente(): React.JSX.Element {
   const { id } = useParams<{ id: string }>()
+  const { sessao, ehDono } = useSessao()
   const [ficha, setFicha] = useState<Ficha | null>(null)
   const [erro, setErro] = useState<string | null>(null)
+  const [mensagem, setMensagem] = useState<string | null>(null)
+  const [editando, setEditando] = useState<ItemHistorico | null>(null)
 
-  useEffect(() => {
+  const carregar = useCallback(async () => {
     if (!id) return
-    api.clientes
-      .ficha(Number(id))
-      .then(setFicha)
-      .catch((e: unknown) =>
-        setErro(e instanceof Error ? e.message : 'Falha ao carregar a ficha do cliente.')
-      )
+    try {
+      setFicha(await api.clientes.ficha(Number(id)))
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Falha ao carregar a ficha do cliente.')
+    }
   }, [id])
 
-  if (erro) return <Aviso tipo="erro">{erro}</Aviso>
+  useEffect(() => {
+    void carregar()
+  }, [carregar])
+
+  /** DONO edita qualquer atendimento; o profissional, so os que ele realizou. */
+  function podeEditar(h: ItemHistorico): boolean {
+    return ehDono || (sessao?.profissionalId != null && sessao.profissionalId === h.profissionalId)
+  }
+
+  async function estornar(h: ItemHistorico): Promise<void> {
+    const ok = confirm(
+      `Estornar o atendimento "${h.procedimentoNome}" de ${dataCurta(h.realizadoEm)}?\n\n` +
+        '- os materiais usados voltam para o estoque\n' +
+        '- o agendamento volta para "agendado"\n' +
+        '- o atendimento sai do historico do cliente'
+    )
+    if (!ok) return
+    try {
+      await api.atendimentos.estornar(h.atendimentoId)
+      setMensagem('Atendimento estornado. Os materiais voltaram para o estoque.')
+      await carregar()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Falha ao estornar o atendimento.')
+    }
+  }
+
+  if (erro && !ficha) return <Aviso tipo="erro">{erro}</Aviso>
   if (!ficha) return <Carregando />
 
   const { cliente, historico, proximosAgendamentos } = ficha
@@ -39,6 +69,17 @@ export function FichaCliente(): React.JSX.Element {
           Voltar
         </Link>
       </div>
+
+      {erro && (
+        <Aviso tipo="erro" onFechar={() => setErro(null)}>
+          {erro}
+        </Aviso>
+      )}
+      {mensagem && (
+        <Aviso tipo="sucesso" onFechar={() => setMensagem(null)}>
+          {mensagem}
+        </Aviso>
+      )}
 
       {(cliente.alergias || cliente.observacoesSaude) && (
         <Aviso tipo="atencao">
@@ -155,11 +196,146 @@ export function FichaCliente(): React.JSX.Element {
                     {h.retornoVencido && ' — vencido'}
                   </div>
                 )}
+                {(podeEditar(h) || ehDono) && (
+                  <div style={{ marginTop: 6 }}>
+                    {podeEditar(h) && (
+                      <button
+                        className="btn btn-pequeno"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => setEditando(h)}
+                      >
+                        Editar
+                      </button>
+                    )}
+                    {ehDono && (
+                      <button
+                        className="btn btn-pequeno btn-perigo"
+                        onClick={() => void estornar(h)}
+                      >
+                        Estornar
+                      </button>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {editando && (
+        <ModalEditarAtendimento
+          item={editando}
+          completo={ehDono}
+          onFechar={() => setEditando(null)}
+          onSalvo={async () => {
+            setEditando(null)
+            setMensagem('Atendimento atualizado.')
+            await carregar()
+          }}
+        />
+      )}
     </>
+  )
+}
+
+/**
+ * Edicao de um atendimento ja registrado. `completo` (DONO) libera valor e forma de
+ * pagamento; o profissional so corrige as proprias anotacoes e a data de retorno.
+ * O processo principal aplica a mesma regra, entao a tela nao e a unica barreira.
+ */
+function ModalEditarAtendimento({
+  item,
+  completo,
+  onFechar,
+  onSalvo
+}: {
+  item: ItemHistorico
+  completo: boolean
+  onFechar: () => void
+  onSalvo: () => Promise<void>
+}): React.JSX.Element {
+  const [valor, setValor] = useState(String(item.valorCobrado))
+  const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>(item.formaPagamento)
+  const [anotacoes, setAnotacoes] = useState(item.anotacoesTecnicas ?? '')
+  const [retorno, setRetorno] = useState(item.dataRetornoSugerida ?? '')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+
+  async function salvar(): Promise<void> {
+    setSalvando(true)
+    setErro(null)
+    try {
+      const dados: Record<string, unknown> = {
+        anotacoesTecnicas: anotacoes.trim() || null,
+        dataRetornoSugerida: retorno || null
+      }
+      if (completo) {
+        dados.valorCobrado = Number(valor)
+        dados.formaPagamento = formaPagamento
+      }
+      await api.atendimentos.atualizar(item.atendimentoId, dados)
+      await onSalvo()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Falha ao salvar o atendimento.')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <Modal titulo={`Editar — ${item.procedimentoNome}`} onFechar={onFechar}>
+      {erro && <Aviso tipo="erro">{erro}</Aviso>}
+      <p className="texto-suave" style={{ marginTop: 0 }}>
+        Realizado em {dataHora(item.realizadoEm)} com {item.profissionalNome}.
+      </p>
+
+      {completo && (
+        <div className="linha-campos">
+          <Campo rotulo="Valor cobrado (R$)">
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={valor}
+              onChange={(e) => setValor(e.target.value)}
+            />
+          </Campo>
+          <Campo rotulo="Forma de pagamento">
+            <select
+              value={formaPagamento}
+              onChange={(e) => setFormaPagamento(e.target.value as FormaPagamento)}
+            >
+              <option value="PIX">PIX</option>
+              <option value="DINHEIRO">Dinheiro</option>
+              <option value="DEBITO">Debito</option>
+              <option value="CREDITO">Credito</option>
+              <option value="OUTRO">Outro</option>
+            </select>
+          </Campo>
+        </div>
+      )}
+
+      <Campo rotulo="Anotacoes tecnicas">
+        <textarea value={anotacoes} onChange={(e) => setAnotacoes(e.target.value)} />
+      </Campo>
+
+      <Campo rotulo="Data de retorno sugerida">
+        <input type="date" value={retorno} onChange={(e) => setRetorno(e.target.value)} />
+      </Campo>
+
+      <div className="rodape-modal">
+        <button className="btn" onClick={onFechar}>
+          Cancelar
+        </button>
+        <button
+          className="btn btn-primario"
+          onClick={() => void salvar()}
+          disabled={salvando || (completo && !(Number(valor) >= 0 && valor !== ''))}
+        >
+          {salvando ? 'Salvando...' : 'Salvar'}
+        </button>
+      </div>
+    </Modal>
   )
 }

@@ -4,6 +4,7 @@ import type {
   AgendamentoDetalhado,
   Atendimento,
   AvisoProfissional,
+  FormaPagamento,
   Cliente,
   CotacaoDolar,
   Material,
@@ -29,9 +30,11 @@ export interface ItemHistorico {
   atendimentoId: number
   agendamentoId: number
   procedimentoNome: string
+  profissionalId: number
   profissionalNome: string
   realizadoEm: string
   valorCobrado: number
+  formaPagamento: FormaPagamento
   anotacoesTecnicas: string | null
   dataRetornoSugerida: string | null
   retornoVencido: boolean
@@ -204,6 +207,8 @@ export const api = {
         fim,
         profissionalId
       ),
+    atualizar: (id: number, dados: unknown) =>
+      invocar<Atendimento>('atendimentos:atualizar', id, dados),
     estornar: (id: number) => invocar<boolean>('atendimentos:estornar', id)
   },
 
