@@ -264,11 +264,42 @@ export function registrarHandlers(): void {
   protegido('cotacao:historico', (_i, limite: number) => servicos.estoque.historicoCotacoes(limite))
 
   // ---- Lembretes e relatorios ---------------------------------------------
-  protegido('lembretes:pendentes', () => servicos.notificacoes.pendentes())
+  // Lembretes passam pela API propria: ela e a dona do agendador e do envio.
+  protegido('lembretes:status', () => servicos.apiPropria.status())
+
+  protegido('lembretes:pendentes', () => servicos.apiPropria.lembretesPendentes())
 
   protegido('lembretes:enviar', async (identidade) => {
     servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
-    return servicos.notificacoes.enviarLembretesPendentes()
+    return servicos.apiPropria.executarLembretes()
+  })
+
+  // ---- Avisos internos para os profissionais -------------------------------
+  // O envio passa pela API propria, a mesma que dispara os avisos sozinha as 09:00.
+  protegido('avisos:enviarAmanha', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
+    return servicos.apiPropria.executarAvisos(identidade.usuarioId)
+  })
+
+  protegido('avisos:enviados', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO', 'RECEPCAO')
+    return servicos.avisos.enviadosParaAmanha()
+  })
+
+  protegido('avisos:meus', async (identidade) => {
+    servicos.auth.exigirPerfil(identidade, 'PROFISSIONAL')
+    return servicos.avisos.meus(servicos.auth.filtroProfissional(identidade) as number)
+  })
+
+  protegido('avisos:marcarLido', async (identidade, id: number) => {
+    servicos.auth.exigirPerfil(identidade, 'PROFISSIONAL')
+    return servicos.avisos.marcarLido(id, servicos.auth.filtroProfissional(identidade) as number)
+  })
+
+  protegido('avisos:remover', async (identidade, id: number) => {
+    servicos.auth.exigirPerfil(identidade, 'DONO')
+    await servicos.avisos.remover(id)
+    return true
   })
 
   protegido('relatorios:painel', (identidade) =>

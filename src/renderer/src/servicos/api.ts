@@ -3,12 +3,14 @@ import type {
   Agendamento,
   AgendamentoDetalhado,
   Atendimento,
+  AvisoProfissional,
   Cliente,
   CotacaoDolar,
   Material,
   MovimentacaoEstoque,
   Procedimento,
   Profissional,
+  ResultadoAvisos,
   SessaoUsuario,
   Usuario
 } from '@shared/tipos'
@@ -85,6 +87,16 @@ export interface ResultadoLembretes {
   enviados: number
   simulados: number
   falhas: Array<{ agendamentoId: number; motivo: string }>
+}
+
+export interface StatusServicoLembretes {
+  online: boolean
+  agendadorAtivo: boolean
+  emailConfigurado: boolean
+  bancoOk: boolean
+  pendentes: number
+  verificadoEm: string
+  erro?: string
 }
 
 export interface MaterialDoProcedimento {
@@ -193,7 +205,16 @@ export const api = {
     historico: (limite = 15) => invocar<CotacaoDolar[]>('cotacao:historico', limite)
   },
 
+  avisos: {
+    enviarAmanha: () => invocar<ResultadoAvisos>('avisos:enviarAmanha'),
+    enviados: () => invocar<AvisoProfissional[]>('avisos:enviados'),
+    meus: () => invocar<AvisoProfissional[]>('avisos:meus'),
+    marcarLido: (id: number) => invocar<AvisoProfissional>('avisos:marcarLido', id),
+    remover: (id: number) => invocar<boolean>('avisos:remover', id)
+  },
+
   lembretes: {
+    status: () => invocar<StatusServicoLembretes>('lembretes:status'),
     pendentes: () => invocar<AgendamentoDetalhado[]>('lembretes:pendentes'),
     enviar: () => invocar<ResultadoLembretes>('lembretes:enviar')
   },

@@ -7,6 +7,8 @@ import { AtendimentoService } from '../core/services/AtendimentoService.js'
 import { EstoqueService } from '../core/services/EstoqueService.js'
 import { NotificacaoService } from '../core/services/NotificacaoService.js'
 import { RelatorioService } from '../core/services/RelatorioService.js'
+import { ApiPropriaClient } from '../core/integrations/ApiPropriaClient.js'
+import { AvisoService } from '../core/services/AvisoService.js'
 
 /** Instancia unica de cada servico, compartilhada por todos os handlers IPC. */
 export const servicos = {
@@ -18,7 +20,9 @@ export const servicos = {
   atendimentos: new AtendimentoService(),
   estoque: new EstoqueService(),
   notificacoes: new NotificacaoService(),
-  relatorios: new RelatorioService()
+  relatorios: new RelatorioService(),
+  apiPropria: new ApiPropriaClient(),
+  avisos: new AvisoService()
 }
 
 export type Servicos = typeof servicos
