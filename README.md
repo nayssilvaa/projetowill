@@ -29,12 +29,46 @@ O dono do estúdio gerencia tudo no papel. Na entrevista ele apontou seis dores 
 
 | # | Requisito | Onde está |
 |---|---|---|
-| 1 | Banco relacional com no mínimo 6 tabelas relacionadas | **12 tabelas e 16 chaves estrangeiras** — [`db/migrations/`](db/migrations/) |
-| 2 | CRUD completo em todas as entidades | `src/core/repositories/` + telas em `src/renderer/src/paginas/` |
+| 1 | Banco relacional com no mínimo 6 tabelas relacionadas | **13 tabelas e 16 chaves estrangeiras** — [`db/migrations/`](db/migrations/) |
+| 2 | CRUD completo em todas as entidades | Telas em `src/renderer/src/paginas/` — detalhado em [CRUD por entidade](#crud-por-entidade) |
 | 3 | Consumo de API em 4 situações distintas | ViaCEP, cotação USD-BRL, SMTP e a API própria — detalhado abaixo |
 | 4 | Segurança justificada | Seção [Decisões de segurança](#decisões-de-segurança) |
-| 5 | Código modularizado em classes (POO) | 10 repositórios, 9 serviços e 3 integrações em `src/core/` |
+| 5 | Código modularizado em classes (POO) | 10 repositórios (sobre um `BaseRepository`), 10 serviços e 4 integrações (sobre um `HttpClient`) em `src/core/` |
 | 6 | Electron com TypeScript, sem `.js` de lógica | Todo o código-fonte é `.ts`/`.tsx` |
+
+### CRUD por entidade
+
+| Entidade | Criar | Ler | Editar | Excluir | Onde |
+|---|---|---|---|---|---|
+| Usuário | ✅ | ✅ | ✅ | ✅ | Usuários (só DONO) |
+| Cliente | ✅ | ✅ | ✅ | ✅ \* | Clientes / ficha do cliente |
+| Endereço | ✅ | ✅ | ✅ | ✅ | Junto do cliente (preenchido pelo CEP; sai junto quando o cliente é excluído) |
+| Profissional | ✅ | ✅ | ✅ | ✅ \* | Profissionais |
+| Procedimento | ✅ | ✅ | ✅ | ✅ \* | Procedimentos |
+| Profissional × procedimento | ✅ | ✅ | — | ✅ | Profissionais (habilitar / desabilitar) |
+| Agendamento | ✅ | ✅ | ✅ | ✅ | Agenda (agendar, remarcar, confirmar, cancelar, excluir) |
+| Atendimento | ✅ | ✅ | ✅ | ✅ | Agenda (registrar) e ficha do cliente (editar, estornar) |
+| Material | ✅ | ✅ | ✅ | ✅ \* | Estoque |
+| Procedimento × material | ✅ | ✅ | — | ✅ | Procedimentos (ficha técnica) |
+| Aviso ao profissional | ✅ | ✅ | ✅ | — | Painel (enviar, marcar como lido, reenviar atualiza) |
+| Movimentação de estoque | ✅ | ✅ | ❌ | ❌ | Estoque (compra, ajuste e baixa automática) |
+| Cotação do dólar | ✅ | ✅ | ❌ | ❌ | Estoque e Painel (consultar, histórico) |
+
+\* Quando o registro já tem histórico (cliente que fez procedimento, profissional com agenda,
+material já movimentado), a exclusão vira **desativação**: ele some das listas, mas o histórico
+continua. Apagar de verdade destruiria o histórico de saúde e o registro financeiro.
+
+**Por que movimentação e cotação não têm editar nem excluir.** As duas são **registros de
+histórico**, como um extrato bancário:
+
+- **Movimentação de estoque** é o extrato do estoque: o saldo atual de cada material é a soma
+  dessas linhas. Editar ou apagar uma delas deixaria o saldo sem explicação. Um erro é corrigido
+  com um **novo lançamento** de ajuste, e o estorno de um atendimento lança a devolução dos
+  materiais em vez de apagar a saída.
+- **Cotação do dólar** fica ligada às compras de material importado e **congela o câmbio**
+  daquela compra. Alterar ou apagar uma cotação mudaria o custo de compras já feitas.
+
+Os dois casos são decisões de domínio, não CRUD esquecido.
 
 ---
 
@@ -258,7 +292,7 @@ cp .env.example .env
 Abra o `.env` e preencha `DB_PASSWORD` com a senha do MySQL **da sua máquina**. Depois:
 
 ```bash
-npm run db:migrate   # cria o banco e as 12 tabelas
+npm run db:migrate   # cria o banco e as 13 tabelas
 npm run db:seed      # popula com dados de exemplo
 npm run dev          # abre o aplicativo
 ```
