@@ -74,6 +74,11 @@ export class NotificacaoService {
     return this.agendamentos.pendentesDeLembrete(dia(1), dia(2))
   }
 
+  /** Se ha conta SMTP configurada; sem ela os envios sao apenas simulados. */
+  get emailConfigurado(): boolean {
+    return this.email.configurado
+  }
+
   async enviarLembretesPendentes(): Promise<ResultadoLembretes> {
     const pendentes = await this.pendentes()
     const resultado: ResultadoLembretes = {
@@ -93,9 +98,14 @@ export class NotificacaoService {
           textoSimples: corpo.texto,
           html: corpo.html
         })
+        // Envio simulado (SMTP nao configurado) NAO conta como enviado: o lembrete
+        // continua pendente e sai de verdade assim que o e-mail for configurado.
+        if (envio.simulado) {
+          resultado.simulados++
+          continue
+        }
         await this.agendamentos.marcarLembreteEnviado(agendamento.id)
         resultado.enviados++
-        if (envio.simulado) resultado.simulados++
       } catch (erro) {
         resultado.falhas.push({
           agendamentoId: agendamento.id,

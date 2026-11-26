@@ -33,19 +33,38 @@ export class EmailClient {
     return this.transporter
   }
 
+  /** Traduz os erros mais comuns do SMTP para algo que a recepcao consiga resolver. */
+  private traduzirErro(erro: unknown): string {
+    const codigo = (erro as { code?: string } | null)?.code
+    if (codigo === 'EAUTH') {
+      return 'o servidor de e-mail recusou o login: confira SMTP_USER e SMTP_PASSWORD (no Gmail, use uma senha de app)'
+    }
+    if (codigo === 'ECONNECTION' || codigo === 'ETIMEDOUT' || codigo === 'ESOCKET') {
+      return 'nao foi possivel conectar ao servidor de e-mail: confira SMTP_HOST, SMTP_PORT e a internet'
+    }
+    if (codigo === 'EENVELOPE') {
+      return 'endereco de e-mail do cliente invalido ou recusado'
+    }
+    return erro instanceof Error ? erro.message : 'falha desconhecida no envio de e-mail'
+  }
+
   async enviar(mensagem: MensagemEmail): Promise<{ enviado: boolean; simulado: boolean }> {
     if (!this.configurado) {
       console.info(`[email simulado] para=${mensagem.para} assunto="${mensagem.assunto}"`)
       return { enviado: true, simulado: true }
     }
 
-    await this.obterTransporter().sendMail({
-      from: env.smtp.from,
-      to: mensagem.para,
-      subject: mensagem.assunto,
-      text: mensagem.textoSimples,
-      html: mensagem.html
-    })
+    try {
+      await this.obterTransporter().sendMail({
+        from: env.smtp.from,
+        to: mensagem.para,
+        subject: mensagem.assunto,
+        text: mensagem.textoSimples,
+        html: mensagem.html
+      })
+    } catch (erro) {
+      throw new Error(this.traduzirErro(erro))
+    }
     return { enviado: true, simulado: false }
   }
 }
